@@ -1,0 +1,85 @@
+# ── Python ────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+venv/
+venv311/
+.venv/
+env/
+ENV/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+.eggs/
+
+# pytest
+.pytest_cache/
+htmlcov/
+.coverage
+*.cover
+
+# mypy
+.mypy_cache/
+.dmypy.json
+
+# ── FastAPI / Uvicorn ─────────────────────────────────────
+*.log
+
+# ── Environment variables ─────────────────────────────────
+.env
+.env.local
+.env.production
+.env.staging
+# keep this:
+!.env.example
+
+# ── AWS ───────────────────────────────────────────────────
+.aws/
+*.pem
+*.key
+
+# ── Node / React ──────────────────────────────────────────
+node_modules/
+dist/
+build/
+.cache/
+
+# Vite
+frontend/dist/
+frontend/.vite/
+
+# ── Editor / OS ───────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Alembic ───────────────────────────────────────────────
+# keep migrations but ignore temp files
+alembic/versions/__pycache__/
+
+# ── CDK (for later) ───────────────────────────────────────
+cdk/node_modules/
+cdk/dist/
+cdk/*.js
+cdk/*.d.ts
+cdk/cdk.out/
+
+# ── Misc ──────────────────────────────────────────────────
+*.zip
+*.tar.gz
+uploads/
+temp/
+tmp/

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   TrashIcon,
@@ -9,73 +9,20 @@ import {
   Squares2X2Icon,
   ListBulletIcon,
   ExclamationTriangleIcon,
-  XMarkIcon,
 } from '@heroicons/react/24/outline'
+import { api } from '@/lib/api'
 
 // ── Types ──────────────────────────────────────────────────
 type FileType = 'image' | 'video' | 'document'
 type ViewMode = 'grid' | 'list'
 
 interface DeletedFile {
-  file_id:        string
-  original_name:  string
-  file_type:      FileType
-  size:           number
-  deleted_at:     string
-  original_path:  string   // where it was before deletion
+  file_id:     string
+  file_name:   string
+  file_type:   FileType
+  file_size:   number
+  updated_at:  string   // when it was soft deleted
 }
-
-// ── Mock Data ──────────────────────────────────────────────
-const MOCK_DELETED: DeletedFile[] = [
-  {
-    file_id:       'd1',
-    original_name: 'old-resume.pdf',
-    file_type:     'document',
-    size:          450000,
-    deleted_at:    '2026-02-10T10:00:00Z',
-    original_path: '/documents',
-  },
-  {
-    file_id:       'd2',
-    original_name: 'beach-photo.jpg',
-    file_type:     'image',
-    size:          3200000,
-    deleted_at:    '2026-02-15T14:00:00Z',
-    original_path: '/photos',
-  },
-  {
-    file_id:       'd3',
-    original_name: 'project-video.mp4',
-    file_type:     'video',
-    size:          52000000,
-    deleted_at:    '2026-02-20T09:00:00Z',
-    original_path: '/videos',
-  },
-  {
-    file_id:       'd4',
-    original_name: 'notes-draft.docx',
-    file_type:     'document',
-    size:          120000,
-    deleted_at:    '2026-02-22T11:00:00Z',
-    original_path: '/documents',
-  },
-  {
-    file_id:       'd5',
-    original_name: 'birthday.png',
-    file_type:     'image',
-    size:          1800000,
-    deleted_at:    '2026-02-23T16:00:00Z',
-    original_path: '/albums/a1',
-  },
-  {
-    file_id:       'd6',
-    original_name: 'meeting-recording.mp4',
-    file_type:     'video',
-    size:          89000000,
-    deleted_at:    '2026-02-24T08:00:00Z',
-    original_path: '/library',
-  },
-]
 
 // ── Helpers ────────────────────────────────────────────────
 const formatSize = (bytes: number) => {
@@ -88,7 +35,7 @@ const formatDate = (iso: string) =>
     day: 'numeric', month: 'short', year: 'numeric',
   })
 
-// Days remaining before auto-delete
+// Days remaining before auto-delete (30 day window)
 const daysRemaining = (deletedAt: string) => {
   const deleted  = new Date(deletedAt).getTime()
   const now      = Date.now()
@@ -106,18 +53,6 @@ const FILE_ICON: Record<FileType, JSX.Element> = {
   image:    <PhotoIcon        className="w-5 h-5 text-beige-dim" />,
   video:    <FilmIcon         className="w-5 h-5 text-beige-dim" />,
   document: <DocumentTextIcon className="w-5 h-5 text-beige-dim" />,
-}
-
-// Friendly label for original path
-const pathLabel = (path: string) => {
-  if (path.startsWith('/albums/')) return 'Album'
-  const map: Record<string, string> = {
-    '/library':   'Library',
-    '/photos':    'Photos',
-    '/videos':    'Videos',
-    '/documents': 'Documents',
-  }
-  return map[path] ?? 'Library'
 }
 
 // ── Confirm Modal ──────────────────────────────────────────
@@ -145,10 +80,7 @@ function ConfirmModal({
             ? 'bg-red-900/30 border border-red-800'
             : 'bg-surface2 border border-border'
           }`}>
-          {danger
-            ? <TrashIcon            className="w-6 h-6 text-red-400" />
-            : <ExclamationTriangleIcon className="w-6 h-6 text-beige-dim" />
-          }
+          <TrashIcon className={`w-6 h-6 ${danger ? 'text-red-400' : 'text-beige-dim'}`} />
         </div>
         <h2 className="text-beige font-semibold text-lg mb-1">{title}</h2>
         <p className="text-muted text-sm mb-6">{message}</p>
@@ -172,46 +104,134 @@ function ConfirmModal({
 export default function RecycleBin() {
   const navigate = useNavigate()
 
-  const [files,        setFiles]        = useState<DeletedFile[]>(MOCK_DELETED)
-  const [view,         setView]         = useState<ViewMode>('grid')
-  const [confirmEmpty, setConfirmEmpty] = useState(false)
+  const [files,             setFiles]             = useState<DeletedFile[]>([])
+  const [loading,           setLoading]           = useState(true)
+  const [error,             setError]             = useState('')
+  const [view,              setView]              = useState<ViewMode>('grid')
+  const [confirmEmpty,      setConfirmEmpty]      = useState(false)
   const [confirmRestoreAll, setConfirmRestoreAll] = useState(false)
   const [deletingSingle,    setDeletingSingle]    = useState<DeletedFile | null>(null)
   const [restoringSingle,   setRestoringSingle]   = useState<DeletedFile | null>(null)
 
-  // ── Handlers ──────────────────────────────────────────
-  const handleRestore = (file: DeletedFile) => {
-    setFiles(prev => prev.filter(f => f.file_id !== file.file_id))
-    setRestoringSingle(null)
-    // Navigate to original location after restore
-    navigate(file.original_path)
+  // ── Fetch deleted files ────────────────────────────────
+  const fetchDeleted = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const data = await api('/files/recycle-bin')
+      setFiles(data.files ?? [])
+    } catch (e: any) {
+      setError(e.message ?? 'Failed to load recycle bin')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchDeleted()
+  }, [fetchDeleted])
+
+  // ── Auto-delete expired files on load ─────────────────
+  // Files older than 30 days are permanently deleted automatically
+  useEffect(() => {
+    if (files.length === 0) return
+
+    const expired = files.filter(f => daysRemaining(f.updated_at) === 0)
+    if (expired.length === 0) return
+
+    const purgeExpired = async () => {
+      await Promise.all(
+        expired.map(f =>
+          api(`/files/${f.file_id}/permanent`, { method: 'DELETE' })
+            .catch(() => {}) // ignore individual errors
+        )
+      )
+      // Remove expired from UI
+      setFiles(prev =>
+        prev.filter(f => daysRemaining(f.updated_at) > 0)
+      )
+    }
+
+    purgeExpired()
+  }, [files.length]) // run once after files load
+
+  // ── Restore single ─────────────────────────────────────
+  const handleRestore = async (file: DeletedFile) => {
+    try {
+      await api(`/files/${file.file_id}/restore`, { method: 'POST' })
+      setFiles(prev => prev.filter(f => f.file_id !== file.file_id))
+      setRestoringSingle(null)
+      navigate('/library')
+    } catch (e: any) {
+      alert(e.message ?? 'Restore failed')
+    }
   }
 
-  const handleRestoreAll = () => {
-    // Navigate to library after restoring all
-    setFiles([])
-    setConfirmRestoreAll(false)
-    navigate('/library')
+  // ── Restore all ────────────────────────────────────────
+  const handleRestoreAll = async () => {
+    try {
+      await Promise.all(
+        files.map(f =>
+          api(`/files/${f.file_id}/restore`, { method: 'POST' })
+        )
+      )
+      setFiles([])
+      setConfirmRestoreAll(false)
+      navigate('/library')
+    } catch (e: any) {
+      alert(e.message ?? 'Restore all failed')
+    }
   }
 
-  const handleDeleteSingle = (file: DeletedFile) => {
-    setFiles(prev => prev.filter(f => f.file_id !== file.file_id))
-    setDeletingSingle(null)
+  // ── Permanent delete single ────────────────────────────
+  const handleDeleteSingle = async (file: DeletedFile) => {
+    try {
+      await api(`/files/${file.file_id}/permanent`, { method: 'DELETE' })
+      setFiles(prev => prev.filter(f => f.file_id !== file.file_id))
+      setDeletingSingle(null)
+    } catch (e: any) {
+      alert(e.message ?? 'Delete failed')
+    }
   }
 
-  const handleEmptyBin = () => {
-    setFiles([])
-    setConfirmEmpty(false)
+  // ── Empty bin ──────────────────────────────────────────
+  const handleEmptyBin = async () => {
+    try {
+      await Promise.all(
+        files.map(f =>
+          api(`/files/${f.file_id}/permanent`, { method: 'DELETE' })
+        )
+      )
+      setFiles([])
+      setConfirmEmpty(false)
+    } catch (e: any) {
+      alert(e.message ?? 'Empty bin failed')
+    }
   }
+
+  // ── Loading / Error states ─────────────────────────────
+  if (loading) return (
+    <div className="min-h-screen bg-main-bg flex items-center justify-center">
+      <div className="w-8 h-8 border-2 border-beige border-t-transparent
+                      rounded-full animate-spin" />
+    </div>
+  )
+
+  if (error) return (
+    <div className="min-h-screen bg-main-bg flex items-center justify-center">
+      <div className="text-center">
+        <p className="text-red-400 mb-4">{error}</p>
+        <button onClick={fetchDeleted} className="btn-primary">Retry</button>
+      </div>
+    </div>
+  )
 
   // ── Grid Card ──────────────────────────────────────────
   const GridCard = ({ file }: { file: DeletedFile }) => {
-    const days = daysRemaining(file.deleted_at)
+    const days = daysRemaining(file.updated_at)
     return (
       <div className="bg-surface border border-border rounded-xl overflow-hidden
                       group hover:border-beige/30 transition-all duration-200">
-
-        {/* Thumbnail */}
         <div className="h-36 bg-surface2 flex items-center justify-center
                         relative opacity-60 group-hover:opacity-80 transition-opacity">
           {FILE_ICON[file.file_type]}
@@ -246,15 +266,14 @@ export default function RecycleBin() {
           </div>
         </div>
 
-        {/* Info */}
         <div className="px-3 py-2.5">
           <p className="text-beige-dim text-sm font-medium truncate">
-            {file.original_name}
+            {file.file_name}
           </p>
           <p className="text-muted text-xs mt-0.5">
-            Deleted {formatDate(file.deleted_at)}
+            Deleted {formatDate(file.updated_at)}
             {' · '}
-            {pathLabel(file.original_path)}
+            {formatSize(file.file_size)}
           </p>
         </div>
       </div>
@@ -263,48 +282,39 @@ export default function RecycleBin() {
 
   // ── List Row ───────────────────────────────────────────
   const ListRow = ({ file }: { file: DeletedFile }) => {
-    const days = daysRemaining(file.deleted_at)
+    const days = daysRemaining(file.updated_at)
     return (
       <div className="flex items-center gap-4 px-4 py-3 bg-surface border border-border
                       rounded-xl group hover:border-beige/30 transition-all duration-200">
-
-        {/* Icon */}
         <div className="w-10 h-10 bg-surface2 rounded-lg flex items-center
                         justify-center shrink-0 opacity-60">
           {FILE_ICON[file.file_type]}
         </div>
 
-        {/* Name + meta */}
         <div className="flex-1 min-w-0">
           <p className="text-beige-dim text-sm font-medium truncate">
-            {file.original_name}
+            {file.file_name}
           </p>
           <p className="text-muted text-xs mt-0.5">
-            From {pathLabel(file.original_path)}
-            {' · '}
-            {formatSize(file.size)}
+            {formatSize(file.file_size)}
           </p>
         </div>
 
-        {/* Deleted date */}
         <p className="text-muted text-sm hidden md:block w-32 text-right shrink-0">
-          {formatDate(file.deleted_at)}
+          {formatDate(file.updated_at)}
         </p>
 
-        {/* Days badge */}
         <span className={`text-xs px-2.5 py-0.5 rounded-full border
                           font-medium shrink-0 ${daysColor(days)}`}>
           {days}d left
         </span>
 
-        {/* Actions */}
         <div className="flex items-center gap-2
                         opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
           <button
             onClick={() => setRestoringSingle(file)}
             className="w-8 h-8 rounded-full bg-beige flex items-center
                        justify-center hover:bg-beige-dim transition-colors"
-            title="Restore"
           >
             <ArrowUturnLeftIcon className="w-3.5 h-3.5 text-bg" />
           </button>
@@ -313,7 +323,6 @@ export default function RecycleBin() {
             className="w-8 h-8 rounded-full border border-red-800
                        flex items-center justify-center
                        hover:bg-red-900/40 transition-colors"
-            title="Delete permanently"
           >
             <TrashIcon className="w-3.5 h-3.5 text-red-400" />
           </button>
@@ -342,24 +351,19 @@ export default function RecycleBin() {
             <button
               onClick={() => setView('grid')}
               className={`p-1.5 rounded-md transition-colors
-                ${view === 'grid'
-                  ? 'bg-beige text-bg'
-                  : 'text-muted hover:text-beige'}`}
+                ${view === 'grid' ? 'bg-beige text-bg' : 'text-muted hover:text-beige'}`}
             >
               <Squares2X2Icon className="w-4 h-4" />
             </button>
             <button
               onClick={() => setView('list')}
               className={`p-1.5 rounded-md transition-colors
-                ${view === 'list'
-                  ? 'bg-beige text-bg'
-                  : 'text-muted hover:text-beige'}`}
+                ${view === 'list' ? 'bg-beige text-bg' : 'text-muted hover:text-beige'}`}
             >
               <ListBulletIcon className="w-4 h-4" />
             </button>
           </div>
 
-          {/* Restore All */}
           {files.length > 0 && (
             <button
               onClick={() => setConfirmRestoreAll(true)}
@@ -370,7 +374,6 @@ export default function RecycleBin() {
             </button>
           )}
 
-          {/* Empty Bin */}
           {files.length > 0 && (
             <button
               onClick={() => setConfirmEmpty(true)}
@@ -434,7 +437,7 @@ export default function RecycleBin() {
       {restoringSingle && (
         <ConfirmModal
           title="Restore file?"
-          message={`"${restoringSingle.original_name}" will be restored to ${pathLabel(restoringSingle.original_path)}.`}
+          message={`"${restoringSingle.file_name}" will be restored to your Library.`}
           confirmLabel="Restore"
           onConfirm={() => handleRestore(restoringSingle)}
           onCancel={() => setRestoringSingle(null)}
@@ -444,7 +447,7 @@ export default function RecycleBin() {
       {deletingSingle && (
         <ConfirmModal
           title="Permanently delete?"
-          message={`"${deletingSingle.original_name}" will be permanently deleted. This cannot be undone.`}
+          message={`"${deletingSingle.file_name}" will be permanently deleted. This cannot be undone.`}
           confirmLabel="Delete Forever"
           danger
           onConfirm={() => handleDeleteSingle(deletingSingle)}
@@ -455,7 +458,7 @@ export default function RecycleBin() {
       {confirmRestoreAll && (
         <ConfirmModal
           title="Restore all files?"
-          message="All files will be restored to their original locations."
+          message="All files will be restored to your Library."
           confirmLabel="Restore All"
           onConfirm={handleRestoreAll}
           onCancel={() => setConfirmRestoreAll(false)}
@@ -465,7 +468,7 @@ export default function RecycleBin() {
       {confirmEmpty && (
         <ConfirmModal
           title="Empty Recycle Bin?"
-          message="All files will be permanently deleted. This cannot be undone."
+          message="All files will be permanently deleted from S3 and database. This cannot be undone."
           confirmLabel="Empty Bin"
           danger
           onConfirm={handleEmptyBin}

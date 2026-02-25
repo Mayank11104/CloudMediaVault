@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   UserCircleIcon,
@@ -17,18 +17,9 @@ import {
   DocumentTextIcon,
   ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline'
-import { useAuth } from 'react-oidc-context'
-import { cognitoAuthConfig } from '@/auth/authConfig'
-const auth = useAuth()
-const handleLogout = () => {
-  const logoutUrl = `${cognitoAuthConfig.authority.replace(
-    /https:\/\/cognito-idp\.[^/]+\.amazonaws\.com\//,
-    'https://cloudmediavault-auth.auth.eu-west-1.amazoncognito.com/'
-  )}/logout?client_id=${cognitoAuthConfig.client_id}&logout_uri=${encodeURIComponent('http://localhost:5173/login')}`
+import { useAuthStore } from '@/auth/useAuthStore'
+import { api } from '@/lib/api'
 
-  auth.removeUser()
-  window.location.href = logoutUrl
-}
 // ── Types ──────────────────────────────────────────────────
 type Tab = 'profile' | 'security' | 'storage'
 
@@ -39,27 +30,14 @@ interface UserData {
   joined_at:  string
 }
 
-// ── Mock Data ──────────────────────────────────────────────
-const MOCK_USER: UserData = {
-  name:       'Rahul Sharma',
-  email:      'rahul@example.com',
-  avatar_url: null,
-  joined_at:  '2025-12-01T00:00:00Z',
+interface StorageStats {
+  total_bytes:       number
+  total_gb:          number
+  images_bytes:      number
+  videos_bytes:      number
+  documents_bytes:   number
+  file_count:        number
 }
-
-const MOCK_STORAGE = {
-  used:  3.4,
-  total: 10,
-  breakdown: [
-    { label: 'Photos',    size: 1.8, icon: <PhotoIcon        className="w-4 h-4" />, color: 'bg-blue-400'   },
-    { label: 'Videos',    size: 1.2, icon: <FilmIcon         className="w-4 h-4" />, color: 'bg-purple-400' },
-    { label: 'Documents', size: 0.4, icon: <DocumentTextIcon className="w-4 h-4" />, color: 'bg-green-400'  },
-  ],
-}
-
-const MOCK_CONNECTED = [
-  { provider: 'Google',   email: 'rahul@gmail.com', connected: true  },
-]
 
 // ── Helpers ────────────────────────────────────────────────
 const getInitials = (name: string) =>
@@ -70,13 +48,12 @@ const formatDate = (iso: string) =>
     day: 'numeric', month: 'long', year: 'numeric',
   })
 
+const bytesToGB = (bytes: number) =>
+  parseFloat((bytes / (1024 ** 3)).toFixed(2))
+
 // ── Confirm Modal ──────────────────────────────────────────
 function ConfirmModal({
-  title,
-  message,
-  confirmLabel,
-  onConfirm,
-  onCancel,
+  title, message, confirmLabel, onConfirm, onCancel,
 }: {
   title:        string
   message:      string
@@ -105,12 +82,10 @@ function ConfirmModal({
 
 // ── Avatar ─────────────────────────────────────────────────
 function Avatar({
-  user,
-  size = 'lg',
-  onUpload,
+  user, size = 'lg', onUpload,
 }: {
-  user:     UserData
-  size?:    'lg' | 'sm'
+  user:      UserData
+  size?:     'lg' | 'sm'
   onUpload?: (url: string) => void
 }) {
   const fileRef = useRef<HTMLInputElement>(null)
@@ -137,8 +112,6 @@ function Avatar({
           {getInitials(user.name)}
         </div>
       )}
-
-      {/* Upload overlay */}
       {onUpload && (
         <>
           <button
@@ -164,29 +137,51 @@ function Avatar({
 
 // ── Profile Tab ────────────────────────────────────────────
 function ProfileTab({
-  user,
-  onUpdate,
+  user, onUpdate,
 }: {
   user:     UserData
   onUpdate: (u: Partial<UserData>) => void
 }) {
   const [editingName, setEditingName] = useState(false)
   const [name,        setName]        = useState(user.name)
+  const [saving,      setSaving]      = useState(false)
+  const [error,       setError]       = useState('')
 
-  const saveName = () => {
-    if (name.trim() && name !== user.name) onUpdate({ name: name.trim() })
-    setEditingName(false)
+  // ── Update name via Cognito ────────────────────────────
+  const saveName = async () => {
+    if (!name.trim() || name === user.name) {
+      setEditingName(false)
+      return
+    }
+    setSaving(true)
+    setError('')
+    try {
+      await api('/auth/update-profile', {
+        method: 'PATCH',
+        body:   JSON.stringify({ name: name.trim() }),
+      })
+      onUpdate({ name: name.trim() })
+      setEditingName(false)
+    } catch (e: any) {
+      setError(e.message ?? 'Failed to update name')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
     <div className="space-y-6">
-
-      {/* ── Avatar + Basic Info ── */}
       <div className="bg-surface border border-border rounded-2xl p-6">
         <div className="flex items-center gap-6">
-          <Avatar user={user} size="lg" onUpload={url => onUpdate({ avatar_url: url })} />
+          <Avatar
+            user={user}
+            size="lg"
+            onUpload={url => onUpdate({ avatar_url: url })}
+          />
           <div className="flex-1 min-w-0">
-            <p className="text-muted text-xs uppercase tracking-wider mb-1">Full Name</p>
+            <p className="text-muted text-xs uppercase tracking-wider mb-1">
+              Full Name
+            </p>
 
             {editingName ? (
               <div className="flex items-center gap-2">
@@ -196,13 +191,19 @@ function ProfileTab({
                   onChange={e => setName(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && saveName()}
                   autoFocus
+                  disabled={saving}
                 />
                 <button
                   onClick={saveName}
+                  disabled={saving}
                   className="w-8 h-8 rounded-full bg-beige flex items-center
-                             justify-center hover:bg-beige-dim transition-colors"
+                             justify-center hover:bg-beige-dim transition-colors
+                             disabled:opacity-40"
                 >
-                  <CheckIcon className="w-4 h-4 text-bg" />
+                  {saving
+                    ? <div className="w-3 h-3 border border-bg border-t-transparent rounded-full animate-spin" />
+                    : <CheckIcon className="w-4 h-4 text-bg" />
+                  }
                 </button>
                 <button
                   onClick={() => { setName(user.name); setEditingName(false) }}
@@ -225,6 +226,7 @@ function ProfileTab({
               </div>
             )}
 
+            {error && <p className="text-red-400 text-xs mt-1">{error}</p>}
             <p className="text-muted text-sm mt-1">{user.email}</p>
             <p className="text-muted text-xs mt-1">
               Member since {formatDate(user.joined_at)}
@@ -232,38 +234,6 @@ function ProfileTab({
           </div>
         </div>
       </div>
-
-      {/* ── Connected Accounts ── */}
-      <div className="bg-surface border border-border rounded-2xl p-6">
-        <h3 className="text-beige font-semibold mb-4">Connected Accounts</h3>
-        <div className="space-y-3">
-          {MOCK_CONNECTED.map(acc => (
-            <div key={acc.provider}
-              className="flex items-center justify-between px-4 py-3
-                         bg-surface2 rounded-xl border border-border">
-              <div className="flex items-center gap-3">
-                {/* Google G icon */}
-                <div className="w-8 h-8 rounded-full bg-white flex items-center
-                                justify-center text-sm font-bold text-gray-700">
-                  G
-                </div>
-                <div>
-                  <p className="text-beige text-sm font-medium">{acc.provider}</p>
-                  <p className="text-muted text-xs">{acc.email}</p>
-                </div>
-              </div>
-              <span className={`text-xs px-2.5 py-1 rounded-full border font-medium
-                ${acc.connected
-                  ? 'text-green-400 bg-green-900/20 border-green-800'
-                  : 'text-muted bg-surface border-border'
-                }`}>
-                {acc.connected ? 'Connected' : 'Not connected'}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-
     </div>
   )
 }
@@ -276,14 +246,32 @@ function SecurityTab() {
   const [showCurr, setShowCurr] = useState(false)
   const [showNew,  setShowNew]  = useState(false)
   const [showConf, setShowConf] = useState(false)
+  const [saving,   setSaving]   = useState(false)
   const [saved,    setSaved]    = useState(false)
+  const [error,    setError]    = useState('')
 
   const canSave = current && newPass.length >= 8 && newPass === confirm
 
-  const handleSave = () => {
-    setSaved(true)
-    setCurrent(''); setNewPass(''); setConfirm('')
-    setTimeout(() => setSaved(false), 3000)
+  // ── Change password via Cognito ────────────────────────
+  const handleSave = async () => {
+    setSaving(true)
+    setError('')
+    try {
+      await api('/auth/change-password', {
+        method: 'POST',
+        body:   JSON.stringify({
+          current_password: current,
+          new_password:     newPass,
+        }),
+      })
+      setSaved(true)
+      setCurrent(''); setNewPass(''); setConfirm('')
+      setTimeout(() => setSaved(false), 3000)
+    } catch (e: any) {
+      setError(e.message ?? 'Failed to update password')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const PasswordField = ({
@@ -325,8 +313,6 @@ function SecurityTab() {
 
   return (
     <div className="space-y-6">
-
-      {/* ── Change Password ── */}
       <div className="bg-surface border border-border rounded-2xl p-6">
         <div className="flex items-center gap-3 mb-5">
           <ShieldCheckIcon className="w-5 h-5 text-beige-dim" />
@@ -359,17 +345,17 @@ function SecurityTab() {
             placeholder="Repeat new password"
           />
 
-          {/* Mismatch warning */}
           {confirm && newPass !== confirm && (
             <p className="text-red-400 text-xs">Passwords do not match</p>
           )}
-          {/* Too short warning */}
           {newPass && newPass.length < 8 && (
             <p className="text-yellow-400 text-xs">
               Password must be at least 8 characters
             </p>
           )}
-
+          {error && (
+            <p className="text-red-400 text-xs">{error}</p>
+          )}
           {saved && (
             <p className="text-green-400 text-xs flex items-center gap-1.5">
               <CheckIcon className="w-3.5 h-3.5" />
@@ -378,43 +364,105 @@ function SecurityTab() {
           )}
 
           <button
-            disabled={!canSave}
+            disabled={!canSave || saving}
             onClick={handleSave}
-            className="btn-primary text-sm disabled:opacity-40"
+            className="btn-primary text-sm disabled:opacity-40 flex items-center gap-2"
           >
-            Update Password
+            {saving && (
+              <div className="w-3.5 h-3.5 border border-bg border-t-transparent
+                              rounded-full animate-spin" />
+            )}
+            {saving ? 'Updating…' : 'Update Password'}
           </button>
         </div>
       </div>
-
     </div>
   )
 }
 
 // ── Storage Tab ────────────────────────────────────────────
 function StorageTab() {
-  const { used, total, breakdown } = MOCK_STORAGE
-  const pct = (used / total) * 100
+  const [stats,   setStats]   = useState<StorageStats | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error,   setError]   = useState('')
 
-  const barColors = ['bg-blue-400', 'bg-purple-400', 'bg-green-400']
+  const TOTAL_GB    = 10   // plan limit
+  const barColors   = ['bg-blue-400', 'bg-purple-400', 'bg-green-400']
+
+  // ── Fetch real storage stats ───────────────────────────
+  const fetchStats = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const data = await api('/files/stats')
+      setStats(data)
+    } catch (e: any) {
+      setError(e.message ?? 'Failed to load storage stats')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { fetchStats() }, [fetchStats])
+
+  if (loading) return (
+    <div className="flex items-center justify-center py-20">
+      <div className="w-7 h-7 border-2 border-beige border-t-transparent
+                      rounded-full animate-spin" />
+    </div>
+  )
+
+  if (error) return (
+    <div className="text-center py-20">
+      <p className="text-red-400 mb-3">{error}</p>
+      <button onClick={fetchStats} className="btn-primary text-sm">Retry</button>
+    </div>
+  )
+
+  if (!stats) return null
+
+  const usedGB  = bytesToGB(stats.total_bytes)
+  const pct     = Math.min((usedGB / TOTAL_GB) * 100, 100)
+
+  const breakdown = [
+    {
+      label: 'Photos',
+      size:  bytesToGB(stats.images_bytes),
+      icon:  <PhotoIcon        className="w-4 h-4" />,
+      color: barColors[0],
+    },
+    {
+      label: 'Videos',
+      size:  bytesToGB(stats.videos_bytes),
+      icon:  <FilmIcon         className="w-4 h-4" />,
+      color: barColors[1],
+    },
+    {
+      label: 'Documents',
+      size:  bytesToGB(stats.documents_bytes),
+      icon:  <DocumentTextIcon className="w-4 h-4" />,
+      color: barColors[2],
+    },
+  ]
 
   return (
     <div className="space-y-6">
 
-      {/* ── Overall Usage ── */}
+      {/* ── Total usage ── */}
       <div className="bg-surface border border-border rounded-2xl p-6">
         <div className="flex items-center gap-3 mb-5">
           <CloudIcon className="w-5 h-5 text-beige-dim" />
           <h3 className="text-beige font-semibold">Storage Usage</h3>
+          <span className="ml-auto text-muted text-xs">
+            {stats.file_count} file{stats.file_count !== 1 ? 's' : ''}
+          </span>
         </div>
 
-        {/* Big usage display */}
         <div className="flex items-end gap-2 mb-3">
-          <span className="text-4xl font-bold text-beige">{used} GB</span>
-          <span className="text-muted text-lg mb-1">/ {total} GB</span>
+          <span className="text-4xl font-bold text-beige">{usedGB} GB</span>
+          <span className="text-muted text-lg mb-1">/ {TOTAL_GB} GB</span>
         </div>
 
-        {/* Overall bar */}
         <div className="h-3 bg-surface2 rounded-full overflow-hidden mb-2">
           <div
             className={`h-full rounded-full transition-all duration-500
@@ -423,7 +471,7 @@ function StorageTab() {
           />
         </div>
         <p className="text-muted text-xs">
-          {(total - used).toFixed(1)} GB free · {pct.toFixed(0)}% used
+          {(TOTAL_GB - usedGB).toFixed(2)} GB free · {pct.toFixed(0)}% used
         </p>
       </div>
 
@@ -444,33 +492,30 @@ function StorageTab() {
                     {item.size} GB
                   </span>
                   <span className="text-muted text-xs ml-2">
-                    ({((item.size / used) * 100).toFixed(0)}%)
+                    ({usedGB > 0 ? ((item.size / usedGB) * 100).toFixed(0) : 0}%)
                   </span>
                 </div>
               </div>
               <div className="h-1.5 bg-surface2 rounded-full overflow-hidden">
                 <div
-                  className={`h-full rounded-full ${barColors[i]}`}
-                  style={{ width: `${(item.size / total) * 100}%` }}
+                  className={`h-full rounded-full ${item.color}`}
+                  style={{ width: `${(item.size / TOTAL_GB) * 100}%` }}
                 />
               </div>
             </div>
           ))}
         </div>
 
-        {/* Segmented bar */}
+        {/* Combined bar */}
         <div className="mt-6 h-2 rounded-full overflow-hidden flex">
-          {breakdown.map((item, i) => (
+          {breakdown.map(item => (
             <div
               key={item.label}
-              className={`h-full ${barColors[i]}`}
-              style={{ width: `${(item.size / total) * 100}%` }}
+              className={`h-full ${item.color}`}
+              style={{ width: `${(item.size / TOTAL_GB) * 100}%` }}
             />
           ))}
-          {/* Free space */}
-          <div
-            className="h-full bg-surface2 flex-1"
-          />
+          <div className="h-full bg-surface2 flex-1" />
         </div>
         <div className="flex items-center gap-4 mt-2 flex-wrap">
           {breakdown.map((item, i) => (
@@ -492,12 +537,56 @@ function StorageTab() {
 
 // ── Main Component ─────────────────────────────────────────
 export default function Profile() {
-  const navigate = useNavigate()
+  const navigate  = useNavigate()
+  const logout    = useAuthStore(s => s.logout)
+  const user_info = useAuthStore(s => s.user)
 
-  const [user,        setUser]        = useState<UserData>(MOCK_USER)
-  const [activeTab,   setActiveTab]   = useState<Tab>('profile')
-  const [showLogout,  setShowLogout]  = useState(false)
-  const [showDelete,  setShowDelete]  = useState(false)
+  const [user, setUser] = useState<UserData>({
+    name:       user_info?.name  || 'User',
+    email:      user_info?.email || '',
+    avatar_url: null,
+    joined_at:  '2025-12-01T00:00:00Z',
+  })
+
+  const [activeTab,  setActiveTab]  = useState<Tab>('profile')
+  const [showLogout, setShowLogout] = useState(false)
+  const [showDelete, setShowDelete] = useState(false)
+  const [deleting,   setDeleting]   = useState(false)
+
+  // ── Fetch real user info from /auth/me ─────────────────
+  useEffect(() => {
+    const fetchMe = async () => {
+      try {
+        const data = await api('/auth/me')
+        setUser(prev => ({
+          ...prev,
+          name:  data.name  || prev.name,
+          email: data.email || prev.email,
+        }))
+      } catch {}
+    }
+    fetchMe()
+  }, [])
+
+  // ── Logout ─────────────────────────────────────────────
+  const handleLogout = async () => {
+    await logout()
+    navigate('/login', { replace: true })
+  }
+
+  // ── Delete account ─────────────────────────────────────
+  const handleDeleteAccount = async () => {
+    setDeleting(true)
+    try {
+      // Delete all files first
+      await api('/files/delete-all', { method: 'DELETE' })
+        .catch(() => {})  // ignore if endpoint not ready
+      await logout()
+      navigate('/login', { replace: true })
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   const TABS: { key: Tab; label: string; icon: JSX.Element }[] = [
     { key: 'profile',  label: 'Profile',  icon: <UserCircleIcon  className="w-4 h-4" /> },
@@ -592,8 +681,8 @@ export default function Profile() {
         <ConfirmModal
           title="Delete account?"
           message="All your files, albums and data will be permanently deleted. This cannot be undone."
-          confirmLabel="Delete Forever"
-          onConfirm={() => navigate('/login')}
+          confirmLabel={deleting ? 'Deleting…' : 'Delete Forever'}
+          onConfirm={handleDeleteAccount}
           onCancel={() => setShowDelete(false)}
         />
       )}

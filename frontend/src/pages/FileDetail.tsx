@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect, useCallback } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeftIcon,
   ArrowDownTrayIcon,
@@ -16,29 +16,24 @@ import {
   XMarkIcon,
   CheckIcon,
 } from '@heroicons/react/24/outline'
+import { api } from '@/lib/api'
 
 // ── Types ──────────────────────────────────────────────────
 type FileType = 'image' | 'video' | 'document'
 
 interface FileData {
   file_id:       string
-  original_name: string
+  file_name:     string
   file_type:     FileType
   mime_type:     string
-  size:          number
+  file_size:     number
   created_at:    string
-  url:           string   // preview/download URL
+  presigned_url: string
 }
 
-// ── Mock data (replace with API later) ────────────────────
-const MOCK_FILE: FileData = {
-  file_id:       'f1a2b3c4-d5e6',
-  original_name: 'vacation-photo.jpg',
-  file_type:     'image',
-  mime_type:     'image/jpeg',
-  size:          3200000,
-  created_at:    '2026-02-20T10:00:00Z',
-  url:           'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1200',
+interface Album {
+  album_id:   string
+  album_name: string
 }
 
 // ── Helpers ────────────────────────────────────────────────
@@ -65,8 +60,8 @@ function FilePreview({ file }: { file: FileData }) {
       </div>
     ) : (
       <img
-        src={file.url}
-        alt={file.original_name}
+        src={file.presigned_url}
+        alt={file.file_name}
         onError={() => setImgError(true)}
         className="w-full h-full object-contain rounded-xl"
       />
@@ -76,7 +71,7 @@ function FilePreview({ file }: { file: FileData }) {
   if (file.file_type === 'video') {
     return (
       <video
-        src={file.url}
+        src={file.presigned_url}
         controls
         className="w-full h-full rounded-xl object-contain bg-black"
       >
@@ -85,17 +80,16 @@ function FilePreview({ file }: { file: FileData }) {
     )
   }
 
-  // Document — PDF native preview or Google Docs Viewer for docx/doc
   if (file.file_type === 'document') {
-    const isPDF = file.mime_type === 'application/pdf'
+    const isPDF      = file.mime_type === 'application/pdf'
     const previewUrl = isPDF
-      ? file.url
-      : `https://docs.google.com/gview?url=${encodeURIComponent(file.url)}&embedded=true`
+      ? file.presigned_url
+      : `https://docs.google.com/gview?url=${encodeURIComponent(file.presigned_url)}&embedded=true`
 
     return (
       <iframe
         src={previewUrl}
-        title={file.original_name}
+        title={file.file_name}
         className="w-full h-full rounded-xl border-0"
       />
     )
@@ -105,11 +99,7 @@ function FilePreview({ file }: { file: FileData }) {
 }
 
 // ── Info Card ──────────────────────────────────────────────
-function InfoCard({
-  icon,
-  label,
-  value,
-}: {
+function InfoCard({ icon, label, value }: {
   icon:  JSX.Element
   label: string
   value: string
@@ -121,18 +111,18 @@ function InfoCard({
         {icon}
         <p className="text-muted text-xs uppercase tracking-wider">{label}</p>
       </div>
-      <p className="text-beige text-sm font-medium">{value}</p>
+      <p className="text-beige text-sm font-medium truncate">{value}</p>
     </div>
   )
 }
 
 // ── Rename Modal ───────────────────────────────────────────
 function RenameModal({
-  current,
-  onConfirm,
-  onCancel,
+  current, saving, error, onConfirm, onCancel,
 }: {
   current:   string
+  saving:    boolean
+  error:     string
   onConfirm: (name: string) => void
   onCancel:  () => void
 }) {
@@ -146,24 +136,31 @@ function RenameModal({
         <p className="text-muted text-sm mb-5">Enter a new name for this file</p>
 
         <input
-          className="input mb-5"
+          className="input mb-2"
           value={name}
           onChange={e => setName(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && name.trim() && onConfirm(name.trim())}
+          onKeyDown={e =>
+            e.key === 'Enter' && name.trim() && !saving && onConfirm(name.trim())
+          }
           autoFocus
+          disabled={saving}
         />
+        {error && <p className="text-red-400 text-xs mb-3">{error}</p>}
 
-        <div className="flex gap-3 justify-end">
-          <button onClick={onCancel} className="btn-ghost text-sm">
+        <div className="flex gap-3 justify-end mt-3">
+          <button onClick={onCancel} disabled={saving} className="btn-ghost text-sm">
             Cancel
           </button>
           <button
             onClick={() => name.trim() && onConfirm(name.trim())}
-            disabled={!name.trim() || name === current}
-            className="btn-primary text-sm flex items-center gap-2"
+            disabled={!name.trim() || name === current || saving}
+            className="btn-primary text-sm flex items-center gap-2 disabled:opacity-40"
           >
-            <CheckIcon className="w-4 h-4" />
-            Rename
+            {saving
+              ? <div className="w-3.5 h-3.5 border border-bg border-t-transparent rounded-full animate-spin" />
+              : <CheckIcon className="w-4 h-4" />
+            }
+            {saving ? 'Saving…' : 'Rename'}
           </button>
         </div>
       </div>
@@ -172,10 +169,51 @@ function RenameModal({
 }
 
 // ── Move to Album Modal ────────────────────────────────────
-function AlbumModal({ onCancel }: { onCancel: () => void }) {
-  // Mock albums — replace with API later
-  const MOCK_ALBUMS = ['Vacation 2026', 'Work Docs', 'Family', 'Projects']
+function AlbumModal({
+  fileId, onDone, onCancel,
+}: {
+  fileId:   string
+  onDone:   () => void
+  onCancel: () => void
+}) {
+  const [albums,   setAlbums]   = useState<Album[]>([])
   const [selected, setSelected] = useState<string | null>(null)
+  const [loading,  setLoading]  = useState(true)
+  const [saving,   setSaving]   = useState(false)
+  const [error,    setError]    = useState('')
+
+  // ── Fetch real albums ──────────────────────────────────
+  useEffect(() => {
+    const fetchAlbums = async () => {
+      try {
+        const data = await api('/albums')
+        setAlbums(data.albums ?? [])
+      } catch (e: any) {
+        setError(e.message ?? 'Failed to load albums')
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchAlbums()
+  }, [])
+
+  // ── Move file to selected album ────────────────────────
+  const handleMove = async () => {
+    if (!selected) return
+    setSaving(true)
+    setError('')
+    try {
+      await api(`/albums/${selected}/files`, {
+        method: 'POST',
+        body:   JSON.stringify({ file_id: fileId }),
+      })
+      onDone()
+    } catch (e: any) {
+      setError(e.message ?? 'Failed to move file')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50
@@ -195,38 +233,61 @@ function AlbumModal({ onCancel }: { onCancel: () => void }) {
           </button>
         </div>
 
-        <div className="space-y-2 mb-5">
-          {MOCK_ALBUMS.map(album => (
-            <button
-              key={album}
-              onClick={() => setSelected(album)}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl
-                          border transition-colors text-left
-                ${selected === album
-                  ? 'border-beige bg-beige/5 text-beige'
-                  : 'border-border text-beige-dim hover:border-beige/30 hover:text-beige'
-                }`}
-            >
-              <RectangleGroupIcon className="w-5 h-5 shrink-0" />
-              <span className="text-sm font-medium">{album}</span>
-              {selected === album && (
-                <CheckIcon className="w-4 h-4 ml-auto" />
-              )}
-            </button>
-          ))}
-        </div>
+        {/* Loading state */}
+        {loading && (
+          <div className="flex items-center justify-center py-8">
+            <div className="w-6 h-6 border-2 border-beige border-t-transparent
+                            rounded-full animate-spin" />
+          </div>
+        )}
+
+        {/* Albums list */}
+        {!loading && albums.length > 0 && (
+          <div className="space-y-2 mb-5 max-h-64 overflow-y-auto pr-1">
+            {albums.map(album => (
+              <button
+                key={album.album_id}
+                onClick={() => setSelected(album.album_id)}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl
+                            border transition-colors text-left
+                  ${selected === album.album_id
+                    ? 'border-beige bg-beige/5 text-beige'
+                    : 'border-border text-beige-dim hover:border-beige/30 hover:text-beige'
+                  }`}
+              >
+                <RectangleGroupIcon className="w-5 h-5 shrink-0" />
+                <span className="text-sm font-medium">{album.album_name}</span>
+                {selected === album.album_id && (
+                  <CheckIcon className="w-4 h-4 ml-auto" />
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Empty state */}
+        {!loading && albums.length === 0 && (
+          <p className="text-muted text-sm text-center py-8">
+            No albums yet. Create one from the Albums page.
+          </p>
+        )}
+
+        {error && <p className="text-red-400 text-xs mb-3">{error}</p>}
 
         <div className="flex gap-3 justify-end">
-          <button onClick={onCancel} className="btn-ghost text-sm">
+          <button onClick={onCancel} disabled={saving} className="btn-ghost text-sm">
             Cancel
           </button>
           <button
-            disabled={!selected}
-            onClick={onCancel}   // replace with actual move API later
-            className="btn-primary text-sm flex items-center gap-2"
+            disabled={!selected || saving || loading}
+            onClick={handleMove}
+            className="btn-primary text-sm flex items-center gap-2 disabled:opacity-40"
           >
-            <RectangleGroupIcon className="w-4 h-4" />
-            Move
+            {saving
+              ? <div className="w-3.5 h-3.5 border border-bg border-t-transparent rounded-full animate-spin" />
+              : <RectangleGroupIcon className="w-4 h-4" />
+            }
+            {saving ? 'Moving…' : 'Move'}
           </button>
         </div>
       </div>
@@ -236,11 +297,10 @@ function AlbumModal({ onCancel }: { onCancel: () => void }) {
 
 // ── Delete Confirm Modal ───────────────────────────────────
 function DeleteModal({
-  fileName,
-  onConfirm,
-  onCancel,
+  fileName, saving, onConfirm, onCancel,
 }: {
   fileName:  string
+  saving:    boolean
   onConfirm: () => void
   onCancel:  () => void
 }) {
@@ -255,14 +315,26 @@ function DeleteModal({
         <h2 className="text-beige font-semibold text-lg mb-1">Delete file?</h2>
         <p className="text-muted text-sm mb-6">
           <span className="text-beige-dim font-medium">"{fileName}"</span> will be
-          permanently deleted. This action cannot be undone.
+          moved to the Recycle Bin.
         </p>
         <div className="flex gap-3">
-          <button onClick={onCancel} className="btn-ghost text-sm flex-1">
+          <button
+            onClick={onCancel}
+            disabled={saving}
+            className="btn-ghost text-sm flex-1"
+          >
             Cancel
           </button>
-          <button onClick={onConfirm} className="btn-danger text-sm flex-1">
-            Delete
+          <button
+            onClick={onConfirm}
+            disabled={saving}
+            className="btn-danger text-sm flex-1 flex items-center justify-center gap-2"
+          >
+            {saving && (
+              <div className="w-3.5 h-3.5 border border-white/30 border-t-white
+                              rounded-full animate-spin" />
+            )}
+            {saving ? 'Deleting…' : 'Delete'}
           </button>
         </div>
       </div>
@@ -272,24 +344,87 @@ function DeleteModal({
 
 // ── Main Component ─────────────────────────────────────────
 export default function FileDetail() {
-  const navigate = useNavigate()
+  const navigate         = useNavigate()
+  const { id }           = useParams<{ id: string }>()   // /library/:id
 
-  // Use mock data — replace with API call using useParams id later
-  const [file, setFile]           = useState<FileData>(MOCK_FILE)
-  const [showRename, setShowRename] = useState(false)
-  const [showAlbum,  setShowAlbum]  = useState(false)
-  const [showDelete, setShowDelete] = useState(false)
+  const [file,        setFile]        = useState<FileData | null>(null)
+  const [loading,     setLoading]     = useState(true)
+  const [error,       setError]       = useState('')
+  const [showRename,  setShowRename]  = useState(false)
+  const [showAlbum,   setShowAlbum]   = useState(false)
+  const [showDelete,  setShowDelete]  = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [renameSaving, setRenameSaving] = useState(false)
+  const [renameError,  setRenameError]  = useState('')
+  const [deleteSaving, setDeleteSaving] = useState(false)
 
-  const handleRename = (newName: string) => {
-    setFile(prev => ({ ...prev, original_name: newName }))
-    setShowRename(false)
+  // ── Fetch file details ─────────────────────────────────
+  const fetchFile = useCallback(async () => {
+    if (!id) return
+    setLoading(true)
+    setError('')
+    try {
+      const data = await api(`/files/${id}`)
+      setFile(data)
+    } catch (e: any) {
+      setError(e.message ?? 'Failed to load file')
+    } finally {
+      setLoading(false)
+    }
+  }, [id])
+
+  useEffect(() => { fetchFile() }, [fetchFile])
+
+  // ── Rename file ────────────────────────────────────────
+  const handleRename = async (newName: string) => {
+    if (!file) return
+    setRenameSaving(true)
+    setRenameError('')
+    try {
+      await api(`/files/${file.file_id}`, {
+        method: 'PATCH',
+        body:   JSON.stringify({ file_name: newName }),
+      })
+      setFile(prev => prev ? { ...prev, file_name: newName } : prev)
+      setShowRename(false)
+    } catch (e: any) {
+      setRenameError(e.message ?? 'Rename failed')
+    } finally {
+      setRenameSaving(false)
+    }
   }
 
-  const handleDelete = () => {
-    // Replace with API call later
-    navigate('/library')
+  // ── Soft delete → Recycle Bin ──────────────────────────
+  const handleDelete = async () => {
+    if (!file) return
+    setDeleteSaving(true)
+    try {
+      await api(`/files/${file.file_id}`, { method: 'DELETE' })
+      navigate('/library')
+    } catch (e: any) {
+      alert(e.message ?? 'Delete failed')
+      setDeleteSaving(false)
+    }
   }
+
+  // ── Loading / Error states ─────────────────────────────
+  if (loading) return (
+    <div className="min-h-screen bg-main-bg flex items-center justify-center">
+      <div className="w-8 h-8 border-2 border-beige border-t-transparent
+                      rounded-full animate-spin" />
+    </div>
+  )
+
+  if (error || !file) return (
+    <div className="min-h-screen bg-main-bg flex items-center justify-center">
+      <div className="text-center">
+        <p className="text-red-400 mb-4">{error || 'File not found'}</p>
+        <button onClick={() => navigate('/library')} className="btn-primary">
+          Back to Library
+        </button>
+      </div>
+    </div>
+  )
 
   const TYPE_ICON: Record<FileType, JSX.Element> = {
     image:    <PhotoIcon        className="w-6 h-6 text-beige-dim" />,
@@ -310,19 +445,18 @@ export default function FileDetail() {
         Back to Library
       </button>
 
-      {/* ── File name + actions row ── */}
+      {/* ── File name + actions ── */}
       <div className="flex items-start justify-between gap-4 mb-6">
         <div className="flex items-center gap-3 min-w-0">
           {TYPE_ICON[file.file_type]}
           <h1 className="text-2xl font-bold text-beige truncate">
-            {file.original_name}
+            {file.file_name}
           </h1>
         </div>
 
-        {/* Action buttons */}
         <div className="flex items-center gap-2 shrink-0">
           <button
-            onClick={() => setShowRename(true)}
+            onClick={() => { setRenameError(''); setShowRename(true) }}
             className="btn-ghost flex items-center gap-2 text-sm"
           >
             <PencilIcon className="w-4 h-4" />
@@ -336,8 +470,8 @@ export default function FileDetail() {
             Album
           </button>
           <a
-            href={file.url}
-            download={file.original_name}
+            href={file.presigned_url}
+            download={file.file_name}
             className="btn-primary flex items-center gap-2 text-sm"
           >
             <ArrowDownTrayIcon className="w-4 h-4" />
@@ -368,7 +502,7 @@ export default function FileDetail() {
         <InfoCard
           icon={<TagIcon            className="w-4 h-4 text-muted" />}
           label="File name"
-          value={file.original_name}
+          value={file.file_name}
         />
         <InfoCard
           icon={TYPE_ICON[file.file_type]}
@@ -378,7 +512,7 @@ export default function FileDetail() {
         <InfoCard
           icon={<ScaleIcon          className="w-4 h-4 text-muted" />}
           label="Size"
-          value={formatSize(file.size)}
+          value={formatSize(file.file_size)}
         />
         <InfoCard
           icon={<CalendarIcon       className="w-4 h-4 text-muted" />}
@@ -392,7 +526,7 @@ export default function FileDetail() {
         />
       </div>
 
-      {/* ── Fullscreen Preview Overlay (click on preview) ── */}
+      {/* ── Fullscreen Preview Overlay ── */}
       {previewOpen && (
         <div
           className="fixed inset-0 bg-black/90 backdrop-blur-sm z-50
@@ -419,17 +553,24 @@ export default function FileDetail() {
       {/* ── Modals ── */}
       {showRename && (
         <RenameModal
-          current={file.original_name}
+          current={file.file_name}
+          saving={renameSaving}
+          error={renameError}
           onConfirm={handleRename}
           onCancel={() => setShowRename(false)}
         />
       )}
       {showAlbum && (
-        <AlbumModal onCancel={() => setShowAlbum(false)} />
+        <AlbumModal
+          fileId={file.file_id}
+          onDone={() => setShowAlbum(false)}
+          onCancel={() => setShowAlbum(false)}
+        />
       )}
       {showDelete && (
         <DeleteModal
-          fileName={file.original_name}
+          fileName={file.file_name}
+          saving={deleteSaving}
           onConfirm={handleDelete}
           onCancel={() => setShowDelete(false)}
         />

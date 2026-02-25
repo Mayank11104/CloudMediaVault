@@ -11,6 +11,7 @@ import {
   ExclamationCircleIcon,
   ViewColumnsIcon,
 } from '@heroicons/react/24/outline'
+import { uploadFile } from '@/lib/api'
 
 // ── Types ──────────────────────────────────────────────────
 type Status = 'pending' | 'uploading' | 'done' | 'error'
@@ -62,33 +63,13 @@ const STATUS_COLORS: Record<Status, string> = {
   error:     'text-red-400',
 }
 
-// ── Simulate upload (replace with real API later) ──────────
-const simulateUpload = (
-  item:       QueueItem,
-  onProgress: (id: string, progress: number) => void,
-  onDone:     (id: string) => void,
-  onError:    (id: string) => void
-) => {
-  let progress = 0
-  const interval = setInterval(() => {
-    progress += Math.random() * 15
-    if (progress >= 100) {
-      clearInterval(interval)
-      onProgress(item.id, 100)
-      Math.random() > 0.95 ? onError(item.id) : onDone(item.id)
-    } else {
-      onProgress(item.id, Math.round(progress))
-    }
-  }, 200)
-}
-
 // ── Drop Zone UI ───────────────────────────────────────────
 function DropZone({
   getRootProps,
   getInputProps,
   isDragActive,
 }: {
-  getRootProps: any
+  getRootProps:  any
   getInputProps: any
   isDragActive:  boolean
 }) {
@@ -139,14 +120,11 @@ function QueueRow({
   return (
     <div className="flex items-center gap-3 bg-surface border border-border
                     rounded-xl px-4 py-3 hover:border-beige/20 transition-colors">
-
-      {/* Icon */}
       <div className="w-9 h-9 bg-surface2 rounded-lg flex items-center
                       justify-center shrink-0">
         {FILE_ICON[type]}
       </div>
 
-      {/* Name + Progress */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between mb-1">
           <p className="text-beige text-sm font-medium truncate pr-2">
@@ -154,7 +132,7 @@ function QueueRow({
           </p>
           <span className={`text-xs font-medium shrink-0 ${STATUS_COLORS[item.status]}`}>
             {item.status === 'pending'   && 'Pending'}
-            {item.status === 'uploading' && `${item.progress}%`}
+            {item.status === 'uploading' && 'Uploading…'}
             {item.status === 'done'      && '✓ Done'}
             {item.status === 'error'     && '✗ Failed'}
           </span>
@@ -164,13 +142,16 @@ function QueueRow({
         <div className="h-1 bg-surface2 rounded-full overflow-hidden">
           <div
             className={`h-full rounded-full transition-all duration-300
-              ${item.status === 'done'  ? 'bg-green-400' :
-                item.status === 'error' ? 'bg-red-500'   : 'bg-beige'}`}
-            style={{ width: `${item.progress}%` }}
+              ${item.status === 'done'      ? 'bg-green-400' :
+                item.status === 'error'     ? 'bg-red-500'   :
+                item.status === 'uploading' ? 'bg-beige animate-pulse' : 'bg-surface2'
+              }`}
+            style={{ width: item.status === 'uploading' ? '100%' :
+                            item.status === 'done'      ? '100%' :
+                            item.status === 'error'     ? '100%' : '0%' }}
           />
         </div>
 
-        {/* Size + error message */}
         <div className="flex items-center justify-between mt-1">
           <p className="text-muted text-xs">{formatSize(item.file.size)}</p>
           {item.error && (
@@ -179,7 +160,6 @@ function QueueRow({
         </div>
       </div>
 
-      {/* Status icon + Remove button */}
       <div className="flex items-center gap-2 shrink-0">
         {item.status === 'done' && (
           <CheckCircleIcon className="w-5 h-5 text-green-400" />
@@ -203,9 +183,39 @@ function QueueRow({
 
 // ── Main Component ─────────────────────────────────────────
 export default function Upload() {
-  const navigate            = useNavigate()
-  const [queue, setQueue]   = useState<QueueItem[]>([])
+  const navigate                = useNavigate()
+  const [queue,    setQueue]    = useState<QueueItem[]>([])
   const [rejected, setRejected] = useState<string[]>([])
+
+  // ── Real upload to backend ─────────────────────────────
+  const uploadToBackend = async (item: QueueItem) => {
+    // Set uploading
+    setQueue(prev =>
+      prev.map(q => q.id === item.id ? { ...q, status: 'uploading' } : q)
+    )
+
+    try {
+      await uploadFile(item.file)   // ✅ real API call
+
+      // Set done
+      setQueue(prev =>
+        prev.map(q =>
+          q.id === item.id
+            ? { ...q, status: 'done', progress: 100 }
+            : q
+        )
+      )
+    } catch (e: any) {
+      // Set error
+      setQueue(prev =>
+        prev.map(q =>
+          q.id === item.id
+            ? { ...q, status: 'error', error: e.message ?? 'Upload failed' }
+            : q
+        )
+      )
+    }
+  }
 
   // ── Dropzone ───────────────────────────────────────────
   const onDrop = useCallback((accepted: File[], rejectedFiles: any[]) => {
@@ -225,38 +235,9 @@ export default function Upload() {
 
     setQueue(prev => [...prev, ...newItems])
 
-    // Start upload for each file
+    // Upload each file sequentially
     newItems.forEach(item => {
-      setTimeout(() => {
-        setQueue(prev =>
-          prev.map(q =>
-            q.id === item.id ? { ...q, status: 'uploading' } : q
-          )
-        )
-        simulateUpload(
-          item,
-          (id, progress) =>
-            setQueue(prev =>
-              prev.map(q => q.id === id ? { ...q, progress } : q)
-            ),
-          (id) =>
-            setQueue(prev =>
-              prev.map(q =>
-                q.id === id
-                  ? { ...q, status: 'done' as Status, progress: 100 }
-                  : q
-              )
-            ),
-          (id) =>
-            setQueue(prev =>
-              prev.map(q =>
-                q.id === id
-                  ? { ...q, status: 'error' as Status, error: 'Upload failed' }
-                  : q
-              )
-            )
-        )
-      }, 300)
+      uploadToBackend(item)
     })
   }, [])
 
@@ -302,7 +283,7 @@ export default function Upload() {
         </div>
       )}
 
-      {/* ── Split Layout: Left drop zone + Right queue ── */}
+      {/* ── Split Layout ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
         {/* Left — Drop Zone */}
@@ -360,10 +341,7 @@ export default function Upload() {
                   </div>
                   <div className="flex items-center gap-3">
                     <button
-                      onClick={() => {
-                        setQueue([])
-                        setRejected([])
-                      }}
+                      onClick={() => { setQueue([]); setRejected([]) }}
                       className="btn-ghost text-sm"
                     >
                       Upload More

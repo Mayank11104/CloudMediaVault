@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   RectangleGroupIcon,
@@ -8,66 +8,20 @@ import {
   PencilIcon,
   TrashIcon,
   PhotoIcon,
-  XMarkIcon,
   CheckIcon,
 } from '@heroicons/react/24/outline'
+import { api } from '@/lib/api'
 
 // ── Types ──────────────────────────────────────────────────
 type ViewMode = 'grid' | 'list'
 
 interface Album {
   album_id:   string
-  name:       string
+  album_name: string
   file_count: number
   created_at: string
   cover_url:  string | null
 }
-
-// ── Mock Data ──────────────────────────────────────────────
-const MOCK_ALBUMS: Album[] = [
-  {
-    album_id:   'a1',
-    name:       'Vacation 2026',
-    file_count: 24,
-    created_at: '2026-02-01T10:00:00Z',
-    cover_url:  'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=400',
-  },
-  {
-    album_id:   'a2',
-    name:       'Work Docs',
-    file_count: 12,
-    created_at: '2026-01-15T09:00:00Z',
-    cover_url:  null,
-  },
-  {
-    album_id:   'a3',
-    name:       'Family',
-    file_count: 38,
-    created_at: '2026-01-10T08:00:00Z',
-    cover_url:  'https://images.unsplash.com/photo-1511895426328-dc8714191011?w=400',
-  },
-  {
-    album_id:   'a4',
-    name:       'Projects',
-    file_count: 7,
-    created_at: '2026-02-10T14:00:00Z',
-    cover_url:  'https://images.unsplash.com/photo-1497366216548-37526070297c?w=400',
-  },
-  {
-    album_id:   'a5',
-    name:       'Screenshots',
-    file_count: 53,
-    created_at: '2026-02-18T11:00:00Z',
-    cover_url:  null,
-  },
-  {
-    album_id:   'a6',
-    name:       'College Notes',
-    file_count: 19,
-    created_at: '2026-01-20T12:00:00Z',
-    cover_url:  null,
-  },
-]
 
 // ── Helpers ────────────────────────────────────────────────
 const formatDate = (iso: string) =>
@@ -77,9 +31,10 @@ const formatDate = (iso: string) =>
 
 // ── Create Album Modal ─────────────────────────────────────
 function CreateAlbumModal({
-  onConfirm,
-  onCancel,
+  saving, error, onConfirm, onCancel,
 }: {
+  saving:    boolean
+  error:     string
   onConfirm: (name: string) => void
   onCancel:  () => void
 }) {
@@ -93,25 +48,33 @@ function CreateAlbumModal({
         <p className="text-muted text-sm mb-5">Give your new album a name</p>
 
         <input
-          className="input mb-5"
+          className="input mb-2"
           placeholder="e.g. Summer Trip, Work Docs…"
           value={name}
           onChange={e => setName(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && name.trim() && onConfirm(name.trim())}
+          onKeyDown={e =>
+            e.key === 'Enter' && name.trim() && !saving && onConfirm(name.trim())
+          }
           autoFocus
+          disabled={saving}
         />
+        {error && <p className="text-red-400 text-xs mb-3">{error}</p>}
 
-        <div className="flex gap-3 justify-end">
-          <button onClick={onCancel} className="btn-ghost text-sm">
+        <div className="flex gap-3 justify-end mt-3">
+          <button onClick={onCancel} disabled={saving} className="btn-ghost text-sm">
             Cancel
           </button>
           <button
-            disabled={!name.trim()}
+            disabled={!name.trim() || saving}
             onClick={() => name.trim() && onConfirm(name.trim())}
-            className="btn-primary text-sm flex items-center gap-2"
+            className="btn-primary text-sm flex items-center gap-2 disabled:opacity-40"
           >
-            <PlusIcon className="w-4 h-4" />
-            Create
+            {saving
+              ? <div className="w-3.5 h-3.5 border border-bg border-t-transparent
+                                rounded-full animate-spin" />
+              : <PlusIcon className="w-4 h-4" />
+            }
+            {saving ? 'Creating…' : 'Create'}
           </button>
         </div>
       </div>
@@ -121,11 +84,11 @@ function CreateAlbumModal({
 
 // ── Rename Album Modal ─────────────────────────────────────
 function RenameAlbumModal({
-  current,
-  onConfirm,
-  onCancel,
+  current, saving, error, onConfirm, onCancel,
 }: {
   current:   string
+  saving:    boolean
+  error:     string
   onConfirm: (name: string) => void
   onCancel:  () => void
 }) {
@@ -139,26 +102,32 @@ function RenameAlbumModal({
         <p className="text-muted text-sm mb-5">Enter a new name for this album</p>
 
         <input
-          className="input mb-5"
+          className="input mb-2"
           value={name}
           onChange={e => setName(e.target.value)}
           onKeyDown={e =>
-            e.key === 'Enter' && name.trim() && onConfirm(name.trim())
+            e.key === 'Enter' && name.trim() && !saving && onConfirm(name.trim())
           }
           autoFocus
+          disabled={saving}
         />
+        {error && <p className="text-red-400 text-xs mb-3">{error}</p>}
 
-        <div className="flex gap-3 justify-end">
-          <button onClick={onCancel} className="btn-ghost text-sm">
+        <div className="flex gap-3 justify-end mt-3">
+          <button onClick={onCancel} disabled={saving} className="btn-ghost text-sm">
             Cancel
           </button>
           <button
-            disabled={!name.trim() || name === current}
+            disabled={!name.trim() || name === current || saving}
             onClick={() => name.trim() && onConfirm(name.trim())}
-            className="btn-primary text-sm flex items-center gap-2"
+            className="btn-primary text-sm flex items-center gap-2 disabled:opacity-40"
           >
-            <CheckIcon className="w-4 h-4" />
-            Rename
+            {saving
+              ? <div className="w-3.5 h-3.5 border border-bg border-t-transparent
+                                rounded-full animate-spin" />
+              : <CheckIcon className="w-4 h-4" />
+            }
+            {saving ? 'Saving…' : 'Rename'}
           </button>
         </div>
       </div>
@@ -168,11 +137,10 @@ function RenameAlbumModal({
 
 // ── Delete Album Modal ─────────────────────────────────────
 function DeleteAlbumModal({
-  albumName,
-  onConfirm,
-  onCancel,
+  albumName, saving, onConfirm, onCancel,
 }: {
   albumName: string
+  saving:    boolean
   onConfirm: () => void
   onCancel:  () => void
 }) {
@@ -190,11 +158,23 @@ function DeleteAlbumModal({
           deleted. Files inside will not be deleted.
         </p>
         <div className="flex gap-3">
-          <button onClick={onCancel} className="btn-ghost text-sm flex-1">
+          <button
+            onClick={onCancel}
+            disabled={saving}
+            className="btn-ghost text-sm flex-1"
+          >
             Cancel
           </button>
-          <button onClick={onConfirm} className="btn-danger text-sm flex-1">
-            Delete Album
+          <button
+            onClick={onConfirm}
+            disabled={saving}
+            className="btn-danger text-sm flex-1 flex items-center justify-center gap-2"
+          >
+            {saving && (
+              <div className="w-3.5 h-3.5 border border-white/30 border-t-white
+                              rounded-full animate-spin" />
+            )}
+            {saving ? 'Deleting…' : 'Delete Album'}
           </button>
         </div>
       </div>
@@ -204,9 +184,7 @@ function DeleteAlbumModal({
 
 // ── Album Cover ────────────────────────────────────────────
 function AlbumCover({
-  cover_url,
-  name,
-  size = 'normal',
+  cover_url, name, size = 'normal',
 }: {
   cover_url: string | null
   name:      string
@@ -231,38 +209,110 @@ function AlbumCover({
 export default function Albums() {
   const navigate = useNavigate()
 
-  const [albums,       setAlbums]       = useState<Album[]>(MOCK_ALBUMS)
+  const [albums,       setAlbums]       = useState<Album[]>([])
+  const [loading,      setLoading]      = useState(true)
+  const [error,        setError]        = useState('')
   const [view,         setView]         = useState<ViewMode>('grid')
   const [showCreate,   setShowCreate]   = useState(false)
   const [renaming,     setRenaming]     = useState<Album | null>(null)
   const [deleting,     setDeleting]     = useState<Album | null>(null)
 
-  // ── Handlers ──────────────────────────────────────────
-  const handleCreate = (name: string) => {
-    const newAlbum: Album = {
-      album_id:   crypto.randomUUID(),
-      name,
-      file_count: 0,
-      created_at: new Date().toISOString(),
-      cover_url:  null,
+  // Per-modal saving + error state
+  const [createSaving, setCreateSaving] = useState(false)
+  const [createError,  setCreateError]  = useState('')
+  const [renameSaving, setRenameSaving] = useState(false)
+  const [renameError,  setRenameError]  = useState('')
+  const [deleteSaving, setDeleteSaving] = useState(false)
+
+  // ── Fetch albums ───────────────────────────────────────
+  const fetchAlbums = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const data = await api('/albums')
+      setAlbums(data.albums ?? [])
+    } catch (e: any) {
+      setError(e.message ?? 'Failed to load albums')
+    } finally {
+      setLoading(false)
     }
-    setAlbums(prev => [newAlbum, ...prev])
-    setShowCreate(false)
+  }, [])
+
+  useEffect(() => { fetchAlbums() }, [fetchAlbums])
+
+  // ── Create album ───────────────────────────────────────
+  const handleCreate = async (name: string) => {
+    setCreateSaving(true)
+    setCreateError('')
+    try {
+      const data = await api('/albums', {
+        method: 'POST',
+        body:   JSON.stringify({ album_name: name }),
+      })
+      // Prepend new album returned by backend
+      setAlbums(prev => [data.album, ...prev])
+      setShowCreate(false)
+    } catch (e: any) {
+      setCreateError(e.message ?? 'Failed to create album')
+    } finally {
+      setCreateSaving(false)
+    }
   }
 
-  const handleRename = (name: string) => {
+  // ── Rename album ───────────────────────────────────────
+  const handleRename = async (name: string) => {
     if (!renaming) return
-    setAlbums(prev =>
-      prev.map(a => a.album_id === renaming.album_id ? { ...a, name } : a)
-    )
-    setRenaming(null)
+    setRenameSaving(true)
+    setRenameError('')
+    try {
+      await api(`/albums/${renaming.album_id}`, {
+        method: 'PATCH',
+        body:   JSON.stringify({ album_name: name }),
+      })
+      setAlbums(prev =>
+        prev.map(a =>
+          a.album_id === renaming.album_id ? { ...a, album_name: name } : a
+        )
+      )
+      setRenaming(null)
+    } catch (e: any) {
+      setRenameError(e.message ?? 'Failed to rename album')
+    } finally {
+      setRenameSaving(false)
+    }
   }
 
-  const handleDelete = () => {
+  // ── Delete album ───────────────────────────────────────
+  const handleDelete = async () => {
     if (!deleting) return
-    setAlbums(prev => prev.filter(a => a.album_id !== deleting.album_id))
-    setDeleting(null)
+    setDeleteSaving(true)
+    try {
+      await api(`/albums/${deleting.album_id}`, { method: 'DELETE' })
+      setAlbums(prev => prev.filter(a => a.album_id !== deleting.album_id))
+      setDeleting(null)
+    } catch (e: any) {
+      alert(e.message ?? 'Failed to delete album')
+    } finally {
+      setDeleteSaving(false)
+    }
   }
+
+  // ── Loading / Error states ─────────────────────────────
+  if (loading) return (
+    <div className="min-h-screen bg-main-bg flex items-center justify-center">
+      <div className="w-8 h-8 border-2 border-beige border-t-transparent
+                      rounded-full animate-spin" />
+    </div>
+  )
+
+  if (error) return (
+    <div className="min-h-screen bg-main-bg flex items-center justify-center">
+      <div className="text-center">
+        <p className="text-red-400 mb-4">{error}</p>
+        <button onClick={fetchAlbums} className="btn-primary">Retry</button>
+      </div>
+    </div>
+  )
 
   // ── Grid Card ──────────────────────────────────────────
   const GridCard = ({ album }: { album: Album }) => (
@@ -271,20 +321,17 @@ export default function Albums() {
       className="bg-surface border border-border rounded-xl overflow-hidden
                  cursor-pointer group hover:border-beige/30 transition-all duration-200"
     >
-      {/* Cover */}
       <div className="relative overflow-hidden">
-        <AlbumCover cover_url={album.cover_url} name={album.name} />
+        <AlbumCover cover_url={album.cover_url} name={album.album_name} />
 
-        {/* Hover overlay with actions */}
         <div className="absolute inset-0 bg-bg/60 opacity-0 group-hover:opacity-100
                         transition-opacity duration-200
                         flex items-center justify-center gap-3">
           <button
-            onClick={e => { e.stopPropagation(); setRenaming(album) }}
+            onClick={e => { e.stopPropagation(); setRenameError(''); setRenaming(album) }}
             className="w-9 h-9 rounded-full bg-surface border border-border
-                       flex items-center justify-center
-                       hover:border-beige/40 hover:text-beige
-                       text-muted transition-colors"
+                       flex items-center justify-center text-muted
+                       hover:border-beige/40 hover:text-beige transition-colors"
             title="Rename"
           >
             <PencilIcon className="w-4 h-4" />
@@ -301,9 +348,10 @@ export default function Albums() {
         </div>
       </div>
 
-      {/* Info */}
       <div className="px-3 py-2.5">
-        <p className="text-beige text-sm font-medium truncate">{album.name}</p>
+        <p className="text-beige text-sm font-medium truncate">
+          {album.album_name}
+        </p>
         <p className="text-muted text-xs mt-0.5">
           {album.file_count} file{album.file_count !== 1 ? 's' : ''}
           {' · '}
@@ -321,29 +369,25 @@ export default function Albums() {
                  rounded-xl cursor-pointer group
                  hover:border-beige/30 transition-all duration-200"
     >
-      {/* Cover thumbnail */}
       <div className="w-12 h-12 rounded-lg overflow-hidden shrink-0">
-        <AlbumCover cover_url={album.cover_url} name={album.name} size="small" />
+        <AlbumCover cover_url={album.cover_url} name={album.album_name} size="small" />
       </div>
 
-      {/* Name + meta */}
       <div className="flex-1 min-w-0">
-        <p className="text-beige text-sm font-medium truncate">{album.name}</p>
+        <p className="text-beige text-sm font-medium truncate">{album.album_name}</p>
         <p className="text-muted text-xs mt-0.5">
           {album.file_count} file{album.file_count !== 1 ? 's' : ''}
         </p>
       </div>
 
-      {/* Date */}
       <p className="text-muted text-sm hidden md:block w-36 text-right shrink-0">
         {formatDate(album.created_at)}
       </p>
 
-      {/* Actions — visible on hover */}
       <div className="flex items-center gap-2
                       opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
         <button
-          onClick={e => { e.stopPropagation(); setRenaming(album) }}
+          onClick={e => { e.stopPropagation(); setRenameError(''); setRenaming(album) }}
           className="w-8 h-8 rounded-full flex items-center justify-center
                      text-muted hover:text-beige hover:bg-surface2 transition-colors"
           title="Rename"
@@ -376,34 +420,26 @@ export default function Albums() {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* View Toggle */}
           <div className="flex items-center bg-surface border border-border
                           rounded-lg p-1 gap-1">
             <button
               onClick={() => setView('grid')}
               className={`p-1.5 rounded-md transition-colors
-                ${view === 'grid'
-                  ? 'bg-beige text-bg'
-                  : 'text-muted hover:text-beige'}`}
-              title="Grid view"
+                ${view === 'grid' ? 'bg-beige text-bg' : 'text-muted hover:text-beige'}`}
             >
               <Squares2X2Icon className="w-4 h-4" />
             </button>
             <button
               onClick={() => setView('list')}
               className={`p-1.5 rounded-md transition-colors
-                ${view === 'list'
-                  ? 'bg-beige text-bg'
-                  : 'text-muted hover:text-beige'}`}
-              title="List view"
+                ${view === 'list' ? 'bg-beige text-bg' : 'text-muted hover:text-beige'}`}
             >
               <ListBulletIcon className="w-4 h-4" />
             </button>
           </div>
 
-          {/* Create Album */}
           <button
-            onClick={() => setShowCreate(true)}
+            onClick={() => { setCreateError(''); setShowCreate(true) }}
             className="btn-primary flex items-center gap-2 text-sm"
           >
             <PlusIcon className="w-4 h-4" />
@@ -421,7 +457,7 @@ export default function Albums() {
             Create an album to organise your files
           </p>
           <button
-            onClick={() => setShowCreate(true)}
+            onClick={() => { setCreateError(''); setShowCreate(true) }}
             className="btn-primary mt-6 flex items-center gap-2"
           >
             <PlusIcon className="w-4 h-4" />
@@ -443,7 +479,6 @@ export default function Albums() {
       {/* ── List View ── */}
       {view === 'list' && albums.length > 0 && (
         <div className="space-y-2">
-          {/* List header */}
           <div className="flex items-center gap-4 px-4 py-2
                           text-xs text-muted uppercase tracking-wider">
             <div className="w-12 shrink-0" />
@@ -460,20 +495,25 @@ export default function Albums() {
       {/* ── Modals ── */}
       {showCreate && (
         <CreateAlbumModal
+          saving={createSaving}
+          error={createError}
           onConfirm={handleCreate}
           onCancel={() => setShowCreate(false)}
         />
       )}
       {renaming && (
         <RenameAlbumModal
-          current={renaming.name}
+          current={renaming.album_name}
+          saving={renameSaving}
+          error={renameError}
           onConfirm={handleRename}
           onCancel={() => setRenaming(null)}
         />
       )}
       {deleting && (
         <DeleteAlbumModal
-          albumName={deleting.name}
+          albumName={deleting.album_name}
+          saving={deleteSaving}
           onConfirm={handleDelete}
           onCancel={() => setDeleting(null)}
         />
