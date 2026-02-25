@@ -1,1 +1,98 @@
 @import "tailwindcss";
+
+/* ── Custom Font ── */
+@font-face {
+  font-family: 'CustomFont';
+  src: url('@/assets/fonts/font.ttf') format('truetype');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ── Design Tokens (Tailwind v4 theme) ── */
+@theme {
+  /* Colors */
+  --color-bg:        #101517;
+  --color-surface:   #161C1F;
+  --color-surface2:  #1C2326;
+  --color-border:    #232C30;
+  --color-beige:     #F6F7F7;
+  --color-beige-dim: #B0BCBF;
+  --color-muted:     #5A6A72;
+  --color-main-bg: #131314; 
+
+  /* Font */
+  --font-sans: 'CustomFont', ui-sans-serif, system-ui;
+}
+
+/* ── Base Styles ── */
+@layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--color-bg);
+    color: var(--color-beige);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar       { width: 6px; }
+  ::-webkit-scrollbar-track { background: #101517; }
+  ::-webkit-scrollbar-thumb {
+    background: #232C30;
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: #5A6A72; }
+
+  /* Text selection */
+  ::selection {
+    background-color: #F6F7F7;
+    color: #101517;
+  }
+}
+
+/* ── Reusable Component Classes ── */
+@layer components {
+
+  .btn-primary {
+    @apply bg-beige text-bg font-semibold px-5 py-2.5 rounded-lg
+           hover:bg-beige-dim transition-colors duration-150
+           disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer;
+  }
+
+  .btn-ghost {
+    @apply border border-border text-beige-dim font-medium px-5 py-2.5 rounded-lg
+           hover:border-beige hover:text-beige transition-colors duration-150
+           disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer;
+  }
+
+  .btn-danger {
+    @apply border border-red-800 text-red-400 font-medium px-5 py-2.5 rounded-lg
+           hover:bg-red-900/30 transition-colors duration-150
+           disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer;
+  }
+
+  .input {
+    @apply w-full bg-surface border border-border rounded-lg px-4 py-2.5
+           text-beige placeholder-muted text-sm
+           focus:outline-none focus:border-beige-dim
+           transition-colors duration-150;
+  }
+
+  .card {
+    @apply bg-surface border border-border rounded-xl p-6;
+  }
+
+  .badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full
+           text-xs font-medium bg-surface2 text-beige-dim border border-border;
+  }
+}
