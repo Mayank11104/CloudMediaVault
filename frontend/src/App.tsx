@@ -8,6 +8,8 @@ import Upload from '@/pages/Upload'
  import Photos from './pages/Photos'
  import Videos from './pages/Videos'
  import Documents from './pages/Documents'
+ import RecycleBin from '@/pages/RecycleBin'
+ import Profile from './pages/Profile'
 const ComingSoon = ({ label }: { label: string }) => (
   <div className="flex items-center justify-center min-h-screen">
     <p className="text-muted text-lg">{label} — coming soon</p>
@@ -28,8 +30,9 @@ export default function App() {
           <Route path="videos"    element={<Videos />} />
           <Route path="documents" element={<Documents />} />
           <Route path="albums"    element={<Albums />} />
-          <Route path="profile"   element={<ComingSoon label="Profile" />} />
+          <Route path="profile"   element={<Profile />} />
           <Route path="files/:id" element={<FileDetail />} />
+          <Route path="recycle-bin" element={<RecycleBin />} />
         </Route>
 
         <Route path="*" element={<NotFound />} />
