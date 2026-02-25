@@ -13,9 +13,11 @@
     "@heroicons/react": "^2.2.0",
     "@tailwindcss/vite": "^4.2.1",
     "axios": "^1.13.5",
+    "oidc-client-ts": "^3.4.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-dropzone": "^15.0.0",
+    "react-oidc-context": "^3.3.0",
     "react-router-dom": "^7.13.1",
     "tailwindcss": "^4.2.1"
   },

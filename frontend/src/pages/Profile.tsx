@@ -17,7 +17,18 @@ import {
   DocumentTextIcon,
   ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline'
+import { useAuth } from 'react-oidc-context'
+import { cognitoAuthConfig } from '@/auth/authConfig'
+const auth = useAuth()
+const handleLogout = () => {
+  const logoutUrl = `${cognitoAuthConfig.authority.replace(
+    /https:\/\/cognito-idp\.[^/]+\.amazonaws\.com\//,
+    'https://cloudmediavault-auth.auth.eu-west-1.amazoncognito.com/'
+  )}/logout?client_id=${cognitoAuthConfig.client_id}&logout_uri=${encodeURIComponent('http://localhost:5173/login')}`
 
+  auth.removeUser()
+  window.location.href = logoutUrl
+}
 // ── Types ──────────────────────────────────────────────────
 type Tab = 'profile' | 'security' | 'storage'
 
@@ -573,7 +584,7 @@ export default function Profile() {
           title="Log out?"
           message="You will be signed out of your account."
           confirmLabel="Log Out"
-          onConfirm={() => navigate('/login')}
+          onConfirm={handleLogout}
           onCancel={() => setShowLogout(false)}
         />
       )}

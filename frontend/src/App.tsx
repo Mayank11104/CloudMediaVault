@@ -1,38 +1,49 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import MainPage from '@/pages/MainPage'
-import NotFound from '@/pages/NotFound'
-import Library from '@/pages/Library'
-import Upload from '@/pages/Upload'
- import FileDetail from '@/pages/FileDetail'
- import Albums from '@/pages/Albums'
- import Photos from './pages/Photos'
- import Videos from './pages/Videos'
- import Documents from './pages/Documents'
- import RecycleBin from '@/pages/RecycleBin'
- import Profile from './pages/Profile'
-const ComingSoon = ({ label }: { label: string }) => (
-  <div className="flex items-center justify-center min-h-screen">
-    <p className="text-muted text-lg">{label} — coming soon</p>
-  </div>
-)
+import MainPage      from '@/pages/MainPage'
+import Login         from '@/pages/Login'
+import NotFound      from '@/pages/NotFound'
+import AuthCallback  from '@/auth/AuthCallback'
+import ProtectedRoute from '@/components/ProtectedRoute'
+
+import Library    from '@/pages/Library'
+import Upload     from '@/pages/Upload'
+import FileDetail from '@/pages/FileDetail'
+import Albums     from '@/pages/Albums'
+import Photos     from '@/pages/Photos'
+import Videos     from '@/pages/Videos'
+import Documents  from '@/pages/Documents'
+import RecycleBin from '@/pages/RecycleBin'
+import Profile    from '@/pages/Profile'
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
 
-        {/* Directly load MainPage — no auth for now */}
-        <Route path="/" element={<MainPage />}>
-          <Route index element={<Navigate to="/library" replace />} />
-          <Route path="library" element={<Library />} />
-          <Route path="upload"  element={<Upload />} />
-          <Route path="photos"    element={<Photos />} />
-          <Route path="videos"    element={<Videos />} />
-          <Route path="documents" element={<Documents />} />
-          <Route path="albums"    element={<Albums />} />
-          <Route path="profile"   element={<Profile />} />
-          <Route path="files/:id" element={<FileDetail />} />
-          <Route path="recycle-bin" element={<RecycleBin />} />
+        {/* Public */}
+        <Route path="/login"          element={<Login />} />
+        <Route path="/auth/callback"  element={<AuthCallback />} />
+
+        {/* Protected — sidebar layout */}
+        <Route
+          path="/"
+          element={
+            <ProtectedRoute>
+              <MainPage />
+            </ProtectedRoute>
+          }
+        >
+          <Route index                  element={<Navigate to="/library" replace />} />
+          <Route path="library"         element={<Library />} />
+          <Route path="upload"          element={<Upload />} />
+          <Route path="files/:id"       element={<FileDetail />} />
+          <Route path="albums"          element={<Albums />} />
+          <Route path="albums/:id"      element={<Albums />} />
+          <Route path="photos"          element={<Photos />} />
+          <Route path="videos"          element={<Videos />} />
+          <Route path="documents"       element={<Documents />} />
+          <Route path="recycle-bin"     element={<RecycleBin />} />
+          <Route path="profile"         element={<Profile />} />
         </Route>
 
         <Route path="*" element={<NotFound />} />
