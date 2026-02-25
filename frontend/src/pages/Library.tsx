@@ -42,6 +42,13 @@ const MOCK_FILES: MockFile[] = [
   { file_id: '9', original_name: 'trip-video.mp4',       file_type: 'video',    size: 120000000,created_at: '2026-02-12T08:00:00Z' },
   { file_id: '10',original_name: 'screenshot.png',       file_type: 'image',    size: 540000,   created_at: '2026-02-11T16:00:00Z' },
 ]
+// Add this inside the component, above the return
+const FILTER_ROUTES: Record<Filter, string> = {
+  all:      '/library',
+  image:    '/photos',
+  video:    '/videos',
+  document: '/documents',
+}
 
 // ── Helpers ────────────────────────────────────────────────
 const formatSize = (bytes: number) => {
@@ -70,13 +77,16 @@ const SORT_OPTIONS: { label: string; value: SortKey }[] = [
   { label: 'Name',  value: 'name' },
   { label: 'Size',  value: 'size' },
 ]
-
+interface LibraryProps {
+  presetFilter?: 'all' | 'image' | 'video' | 'document'
+  pageTitle?:    string
+}
 // ── Main Component ─────────────────────────────────────────
-export default function Library() {
+export default function Library({ presetFilter = 'all', pageTitle = 'Library' }: LibraryProps) {
   const navigate = useNavigate()
 
   const [view,       setView]       = useState<ViewMode>('grid')
-  const [filter,     setFilter]     = useState<Filter>('all')
+  const [filter, setFilter] = useState<Filter>(presetFilter)
   const [search,     setSearch]     = useState('')
   const [sort,       setSort]       = useState<SortKey>('date')
   const [sortOpen,   setSortOpen]   = useState(false)
@@ -199,7 +209,7 @@ export default function Library() {
         {/* Row 1 — Title + Upload button */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-beige">Library</h1>
+            <h1 className="text-2xl font-bold text-beige">{pageTitle}</h1>
             <p className="text-muted text-sm mt-0.5">
               {processed.length} file{processed.length !== 1 ? 's' : ''}
             </p>
@@ -280,18 +290,18 @@ export default function Library() {
         {/* Row 3 — Filter Tabs */}
         <div className="flex items-center gap-2">
           {FILTERS.map(f => (
-            <button
-              key={f.value}
-              onClick={() => setFilter(f.value)}
-              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors
-                ${filter === f.value
-                  ? 'bg-beige text-bg'
-                  : 'bg-surface text-beige-dim border border-border hover:text-beige hover:border-beige/40'
-                }`}
-            >
-              {f.label}
-            </button>
-          ))}
+      <button
+        key={f.value}
+        onClick={() => navigate(FILTER_ROUTES[f.value])}
+        className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors
+          ${filter === f.value
+            ? 'bg-beige text-bg'
+            : 'bg-surface text-beige-dim border border-border hover:text-beige hover:border-beige/40'
+          }`}
+      >
+        {f.label}
+      </button>
+    ))}
         </div>
       </div>
 
