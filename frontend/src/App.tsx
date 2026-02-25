@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import MainPage from '@/pages/MainPage'
 import NotFound from '@/pages/NotFound'
-
+import Library from '@/pages/Library'
 const ComingSoon = ({ label }: { label: string }) => (
   <div className="flex items-center justify-center min-h-screen">
     <p className="text-muted text-lg">{label} — coming soon</p>
@@ -16,7 +16,7 @@ export default function App() {
         {/* Directly load MainPage — no auth for now */}
         <Route path="/" element={<MainPage />}>
           <Route index element={<Navigate to="/library" replace />} />
-          <Route path="library"   element={<ComingSoon label="Library" />} />
+          <Route path="library" element={<Library />} />
           <Route path="upload"    element={<ComingSoon label="Upload" />} />
           <Route path="photos"    element={<ComingSoon label="Photos" />} />
           <Route path="videos"    element={<ComingSoon label="Videos" />} />

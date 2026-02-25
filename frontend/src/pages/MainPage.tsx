@@ -9,7 +9,7 @@ export default function MainPage() {
       <Sidebar />
 
       {/* Main content area — offset by sidebar width */}
-      <main className="ml-[220px] flex-1 min-h-screen overflow-y-auto">
+      <main className="ml-[280px] flex-1 min-h-screen overflow-y-auto">
         <Outlet />
       </main>
 
