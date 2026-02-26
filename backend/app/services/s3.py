@@ -3,7 +3,8 @@ import urllib.parse
 from botocore.exceptions import ClientError
 from fastapi import HTTPException
 from app.database import s3_client as _s3
-from app.config import S3_BUCKET_NAME as BUCKET
+from app.config import S3_BUCKET_NAME as BUCKET, AWS_REGION
+
 
 # ── Upload File ────────────────────────────────────────────
 def upload_file(
@@ -22,6 +23,7 @@ def upload_file(
         return s3_key
     except ClientError:
         raise HTTPException(status_code=500, detail="Failed to upload file")
+
 
 # ── Generate Presigned URL ─────────────────────────────────
 def get_presigned_url(
@@ -44,6 +46,17 @@ def get_presigned_url(
     except ClientError:
         raise HTTPException(status_code=500, detail="Failed to generate download URL")
 
+
+# ✅ Generate Public S3 URL (for thumbnails)
+def get_public_url(s3_key: str) -> str:
+    """Generate public URL for file access."""
+    from app.config import CLOUDFRONT_DOMAIN  # ✅ Import here
+    
+    if CLOUDFRONT_DOMAIN:
+        return f"https://{CLOUDFRONT_DOMAIN}/{s3_key}"
+    return f"https://{BUCKET}.s3.{AWS_REGION}.amazonaws.com/{s3_key}"
+
+
 # ── Delete File ────────────────────────────────────────────
 def delete_file(s3_key: str) -> None:
     try:
@@ -51,11 +64,13 @@ def delete_file(s3_key: str) -> None:
     except ClientError:
         raise HTTPException(status_code=500, detail="Failed to delete file from storage")
 
+
 # ── Make S3 Key ────────────────────────────────────────────
 def make_s3_key(user_id: str, file_id: str, file_name: str) -> str:
     # Sanitize filename — strip path separators, replace spaces
     safe_name = os.path.basename(file_name).replace(" ", "_")
     return f"users/{user_id}/{file_id}/{safe_name}"
+
 
 # ── Get File Size ──────────────────────────────────────────
 def get_file_size(s3_key: str) -> int:

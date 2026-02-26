@@ -92,10 +92,7 @@ export default function Sidebar() {
         className="flex items-center gap-3 px-4 py-5 cursor-pointer"
         onClick={() => navigate('/library')}
       >
-        <div className="w-9 h-9 rounded-full bg-beige flex items-center
-                        justify-center shrink-0">
-          <CloudIcon className="w-5 h-5 text-bg" />
-        </div>
+        <img src="/logo/logo.png" alt="CloudMediaVault" className="w-14 h-14 rounded-full" />
         <span className="text-beige font-bold text-[25px] leading-tight tracking-tight">
           CloudMediaVault
         </span>

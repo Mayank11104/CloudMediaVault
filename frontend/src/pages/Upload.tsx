@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useDropzone } from 'react-dropzone'
 import {
@@ -13,16 +13,26 @@ import {
 } from '@heroicons/react/24/outline'
 import { uploadFile } from '@/lib/api'
 
+
+
 // ── Types ──────────────────────────────────────────────────
-type Status = 'pending' | 'uploading' | 'done' | 'error'
+type Status = 'pending' | 'uploading' | 'done' | 'error' | 'cancelled'
+
+
 
 interface QueueItem {
-  id:       string
-  file:     File
-  progress: number
-  status:   Status
-  error:    string | null
+  id:          string
+  file:        File
+  progress:    number
+  status:      Status
+  error:       string | null
+  width?:      number
+  height?:     number
+  preview_url?: string
+  abortController?: AbortController  // ✅ Add this
 }
+
+
 
 // ── Constants ──────────────────────────────────────────────
 const ALLOWED_TYPES = {
@@ -38,6 +48,8 @@ const ALLOWED_TYPES = {
 }
 const MAX_SIZE = 100 * 1024 * 1024 // 100MB
 
+
+
 // ── Helpers ────────────────────────────────────────────────
 const getFileType = (mime: string) => {
   if (mime.startsWith('image/')) return 'image'
@@ -45,10 +57,45 @@ const getFileType = (mime: string) => {
   return 'document'
 }
 
+
+
 const formatSize = (bytes: number) => {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
+
+
+
+// ✅ Extract image dimensions
+const getImageDimensions = (file: File): Promise<{
+  width: number
+  height: number
+  preview_url: string
+}> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    
+    reader.onload = (e) => {
+      const img = new Image()
+      
+      img.onload = () => {
+        resolve({
+          width: img.width,
+          height: img.height,
+          preview_url: e.target?.result as string
+        })
+      }
+      
+      img.onerror = reject
+      img.src = e.target?.result as string
+    }
+    
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
+
 
 const FILE_ICON: Record<string, JSX.Element> = {
   image:    <PhotoIcon        className="w-5 h-5 text-beige-dim" />,
@@ -56,12 +103,17 @@ const FILE_ICON: Record<string, JSX.Element> = {
   document: <DocumentTextIcon className="w-5 h-5 text-beige-dim" />,
 }
 
+
+
 const STATUS_COLORS: Record<Status, string> = {
   pending:   'text-muted',
   uploading: 'text-beige-dim',
   done:      'text-green-400',
   error:     'text-red-400',
+  cancelled: 'text-orange-400',  // ✅ Add this
 }
+
+
 
 // ── Drop Zone UI ───────────────────────────────────────────
 function DropZone({
@@ -107,22 +159,40 @@ function DropZone({
   )
 }
 
+
+
+// ── Queue Row UI ───────────────────────────────────────────
 // ── Queue Row UI ───────────────────────────────────────────
 function QueueRow({
   item,
   onRemove,
+  onCancel,
 }: {
   item:     QueueItem
   onRemove: (id: string) => void
+  onCancel: (id: string) => void
 }) {
   const type = getFileType(item.file.type)
 
   return (
     <div className="flex items-center gap-3 bg-surface border border-border
-                    rounded-xl px-4 py-3 hover:border-beige/20 transition-colors">
-      <div className="w-9 h-9 bg-surface2 rounded-lg flex items-center
-                      justify-center shrink-0">
-        {FILE_ICON[type]}
+                    rounded-xl px-4 py-3 hover:border-beige/20 transition-colors
+                    group relative">
+      
+      {/* ✅ Thumbnail or Icon */}
+      <div className="w-12 h-12 bg-surface2 rounded-lg flex items-center
+                      justify-center shrink-0 overflow-hidden">
+        {type === 'image' && item.preview_url ? (
+          <img 
+            src={item.preview_url} 
+            alt={item.file.name}
+            className="w-full h-full object-cover"
+          />
+        ) : type === 'video' ? (
+          <FilmIcon className="w-6 h-6 text-beige-dim" />
+        ) : (
+          <DocumentTextIcon className="w-6 h-6 text-beige-dim" />
+        )}
       </div>
 
       <div className="flex-1 min-w-0">
@@ -131,10 +201,11 @@ function QueueRow({
             {item.file.name}
           </p>
           <span className={`text-xs font-medium shrink-0 ${STATUS_COLORS[item.status]}`}>
-            {item.status === 'pending'   && 'Pending'}
-            {item.status === 'uploading' && 'Uploading…'}
-            {item.status === 'done'      && '✓ Done'}
-            {item.status === 'error'     && '✗ Failed'}
+            {item.status === 'pending'    && 'Pending'}
+            {item.status === 'uploading'  && 'Uploading…'}
+            {item.status === 'done'       && '✓ Done'}
+            {item.status === 'error'      && '✗ Failed'}
+            {item.status === 'cancelled'  && '⊘ Cancelled'}
           </span>
         </div>
 
@@ -142,13 +213,15 @@ function QueueRow({
         <div className="h-1 bg-surface2 rounded-full overflow-hidden">
           <div
             className={`h-full rounded-full transition-all duration-300
-              ${item.status === 'done'      ? 'bg-green-400' :
-                item.status === 'error'     ? 'bg-red-500'   :
-                item.status === 'uploading' ? 'bg-beige animate-pulse' : 'bg-surface2'
+              ${item.status === 'done'       ? 'bg-green-400' :
+                item.status === 'error'      ? 'bg-red-500'   :
+                item.status === 'cancelled'  ? 'bg-orange-500' :
+                item.status === 'uploading'  ? 'bg-beige animate-pulse' : 'bg-surface2'
               }`}
             style={{ width: item.status === 'uploading' ? '100%' :
                             item.status === 'done'      ? '100%' :
-                            item.status === 'error'     ? '100%' : '0%' }}
+                            item.status === 'error'     ? '100%' :
+                            item.status === 'cancelled' ? '50%'  : '0%' }}
           />
         </div>
 
@@ -160,32 +233,51 @@ function QueueRow({
         </div>
       </div>
 
-      <div className="flex items-center gap-2 shrink-0">
-        {item.status === 'done' && (
-          <CheckCircleIcon className="w-5 h-5 text-green-400" />
-        )}
-        {item.status === 'error' && (
-          <ExclamationCircleIcon className="w-5 h-5 text-red-400" />
-        )}
-        {(item.status === 'pending' || item.status === 'error') && (
-          <button
-            onClick={() => onRemove(item.id)}
-            className="w-7 h-7 rounded-full flex items-center justify-center
-                       text-muted hover:text-beige hover:bg-surface2 transition-colors"
-          >
-            <XMarkIcon className="w-4 h-4" />
-          </button>
-        )}
-      </div>
+      {/* ✅ X button at top-right corner */}
+      <button
+        onClick={() => {
+          if (item.status === 'uploading') {
+            onCancel(item.id)
+          } else if (item.status === 'pending' || item.status === 'error' || item.status === 'cancelled') {
+            onRemove(item.id)
+          }
+        }}
+        className={`absolute top-2 right-2 w-6 h-6 rounded-full
+                   flex items-center justify-center transition-all
+                   ${item.status === 'done' 
+                     ? 'opacity-0 pointer-events-none' 
+                     : 'opacity-0 group-hover:opacity-100'
+                   }
+                   ${item.status === 'uploading'
+                     ? 'bg-red-900/80 hover:bg-red-900 text-red-300'
+                     : 'bg-surface2 hover:bg-surface text-muted hover:text-beige'
+                   }`}
+        title={item.status === 'uploading' ? 'Cancel upload' : 'Remove from queue'}
+      >
+        <XMarkIcon className="w-4 h-4" />
+      </button>
+
+      {/* Success icon */}
+      {item.status === 'done' && (
+        <CheckCircleIcon className="w-5 h-5 text-green-400 shrink-0" />
+      )}
+      {item.status === 'error' && (
+        <ExclamationCircleIcon className="w-5 h-5 text-red-400 shrink-0" />
+      )}
     </div>
   )
 }
+
+
+
 
 // ── Main Component ─────────────────────────────────────────
 export default function Upload() {
   const navigate                = useNavigate()
   const [queue,    setQueue]    = useState<QueueItem[]>([])
   const [rejected, setRejected] = useState<string[]>([])
+
+
 
   // ── Real upload to backend ─────────────────────────────
   const uploadToBackend = async (item: QueueItem) => {
@@ -194,46 +286,111 @@ export default function Upload() {
       prev.map(q => q.id === item.id ? { ...q, status: 'uploading' } : q)
     )
 
-    try {
-      await uploadFile(item.file)   // ✅ real API call
 
-      // Set done
+
+    try {
+      // ✅ Pass abort signal to upload
+      await uploadFile(item.file, item.width, item.height, item.abortController?.signal)
+
+
+
+      // Set done (only if not cancelled)
       setQueue(prev =>
         prev.map(q =>
-          q.id === item.id
+          q.id === item.id && q.status !== 'cancelled'
             ? { ...q, status: 'done', progress: 100 }
             : q
         )
       )
     } catch (e: any) {
-      // Set error
-      setQueue(prev =>
-        prev.map(q =>
-          q.id === item.id
-            ? { ...q, status: 'error', error: e.message ?? 'Upload failed' }
-            : q
+      // Check if cancelled
+      if (e.name === 'AbortError' || e.message?.includes('cancel')) {
+        setQueue(prev =>
+          prev.map(q =>
+            q.id === item.id
+              ? { ...q, status: 'cancelled', error: 'Upload cancelled' }
+              : q
+          )
         )
-      )
+      } else {
+        // Set error
+        setQueue(prev =>
+          prev.map(q =>
+            q.id === item.id
+              ? { ...q, status: 'error', error: e.message ?? 'Upload failed' }
+              : q
+          )
+        )
+      }
     }
   }
 
+
+
+  // ✅ Cancel upload
+  const cancelUpload = (id: string) => {
+    const item = queue.find(q => q.id === id)
+    if (item?.abortController) {
+      item.abortController.abort()
+    }
+    setQueue(prev =>
+      prev.map(q =>
+        q.id === id
+          ? { ...q, status: 'cancelled', error: 'Upload cancelled by user' }
+          : q
+      )
+    )
+  }
+
+
+
   // ── Dropzone ───────────────────────────────────────────
-  const onDrop = useCallback((accepted: File[], rejectedFiles: any[]) => {
+  const onDrop = useCallback(async (accepted: File[], rejectedFiles: any[]) => {
     setRejected(
       rejectedFiles.map(r =>
         `${r.file.name} — ${r.errors[0]?.message ?? 'Invalid file'}`
       )
     )
 
-    const newItems: QueueItem[] = accepted.map(file => ({
-      id:       crypto.randomUUID(),
-      file,
-      progress: 0,
-      status:   'pending',
-      error:    null,
-    }))
 
+
+    // ✅ Extract dimensions for images before creating queue items
+    const newItemsPromises = accepted.map(async (file) => {
+      let width, height, preview_url
+
+
+      // Get dimensions for images
+      if (file.type.startsWith('image/')) {
+        try {
+          const dimensions = await getImageDimensions(file)
+          width = dimensions.width
+          height = dimensions.height
+          preview_url = dimensions.preview_url
+          console.log(`📐 ${file.name}: ${width}×${height}`)
+        } catch (err) {
+          console.warn(`Failed to get dimensions for ${file.name}`)
+        }
+      }
+
+
+      return {
+        id: crypto.randomUUID(),
+        file,
+        progress: 0,
+        status: 'pending' as Status,
+        error: null,
+        width,
+        height,
+        preview_url,
+        abortController: new AbortController(),  // ✅ Create abort controller
+      }
+    })
+
+
+    const newItems = await Promise.all(newItemsPromises)
     setQueue(prev => [...prev, ...newItems])
+
+
 
     // Upload each file sequentially
     newItems.forEach(item => {
@@ -241,13 +398,19 @@ export default function Upload() {
     })
   }, [])
 
+
+
   const removeItem = (id: string) =>
     setQueue(prev => prev.filter(q => q.id !== id))
+
+
 
   const doneCount      = queue.filter(q => q.status === 'done').length
   const uploadingCount = queue.filter(q => q.status === 'uploading').length
   const allDone        = queue.length > 0 &&
-    queue.every(q => q.status === 'done' || q.status === 'error')
+    queue.every(q => q.status === 'done' || q.status === 'error' || q.status === 'cancelled')
+
+
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -256,8 +419,12 @@ export default function Upload() {
     multiple: true,
   })
 
+
+
   return (
     <div className="min-h-screen bg-main-bg px-6 py-8">
+
+
 
       {/* ── Header ── */}
       <div className="flex items-center justify-between mb-6">
@@ -273,6 +440,8 @@ export default function Upload() {
         <ViewColumnsIcon className="w-5 h-5 text-muted" />
       </div>
 
+
+
       {/* ── Rejected files warning ── */}
       {rejected.length > 0 && (
         <div className="mb-4 bg-red-900/20 border border-red-800
@@ -283,8 +452,12 @@ export default function Upload() {
         </div>
       )}
 
+
+
       {/* ── Split Layout ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+
 
         {/* Left — Drop Zone */}
         <DropZone
@@ -292,6 +465,8 @@ export default function Upload() {
           getInputProps={getInputProps}
           isDragActive={isDragActive}
         />
+
+
 
         {/* Right — Queue */}
         <div className="flex flex-col gap-3">
@@ -316,12 +491,21 @@ export default function Upload() {
                 </p>
               </div>
 
+
+
               {/* Queue list */}
               <div className="space-y-2 overflow-y-auto max-h-[calc(100vh-280px)] pr-1">
                 {queue.map(item => (
-                  <QueueRow key={item.id} item={item} onRemove={removeItem} />
+                  <QueueRow 
+                    key={item.id} 
+                    item={item} 
+                    onRemove={removeItem}
+                    onCancel={cancelUpload}  
+                  />
                 ))}
               </div>
+
+
 
               {/* All done banner */}
               {allDone && (
@@ -359,6 +543,8 @@ export default function Upload() {
           )}
         </div>
       </div>
+
+
 
     </div>
   )

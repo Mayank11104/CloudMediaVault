@@ -1,14 +1,20 @@
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
+
+
 // ── Prevent parallel 401s ──────────────────────────────────
 let isRefreshing = false
 let refreshPromise: Promise<boolean> | null = null
+
+
 
 const refreshTokens = (): Promise<boolean> => {
   if (isRefreshing && refreshPromise) {
     console.log('⏳ Token refresh already in progress')
     return refreshPromise
   }
+
+
 
   console.log('🔄 Starting token refresh...')
   isRefreshing = true
@@ -29,8 +35,12 @@ const refreshTokens = (): Promise<boolean> => {
       refreshPromise = null
     })
 
+
+
   return refreshPromise
 }
+
+
 
 // ── Base API client ────────────────────────────────────────
 export const api = async (
@@ -39,6 +49,8 @@ export const api = async (
   _retry = true,
 ): Promise<any> => {
   console.log(`📡 ${options.method || 'GET'} ${endpoint}`)
+
+
 
   const res = await fetch(`${BASE_URL}${endpoint}`, {
     ...options,
@@ -49,7 +61,11 @@ export const api = async (
     },
   })
 
+
+
   console.log(`📥 ${res.status} ${endpoint}`)
+
+
 
   // Handle 401 - Token expired, try refresh
   if (res.status === 401 && _retry) {
@@ -65,6 +81,8 @@ export const api = async (
     }
   }
 
+
+
   // Parse response
   const contentType = res.headers.get('content-type')
   if (contentType?.includes('application/json')) {
@@ -73,9 +91,13 @@ export const api = async (
     return data
   }
 
+
+
   if (!res.ok) throw new Error(`Request failed: ${res.status}`)
   return res
 }
+
+
 
 // ── Username validation ────────────────────────────────────
 export const checkUsername = async (username: string): Promise<{
@@ -86,20 +108,36 @@ export const checkUsername = async (username: string): Promise<{
   return api(`/auth/check-username/${username}`, { method: 'GET' })
 }
 
-// ── File upload ────────────────────────────────────────────
-export const uploadFile = async (file: File): Promise<any> => {
+
+
+// ── File upload with dimensions and abort signal ───────────
+export const uploadFile = async (
+  file: File,
+  width?: number,
+  height?: number,
+  signal?: AbortSignal  // ✅ Add abort signal parameter
+): Promise<any> => {
   const formData = new FormData()
   formData.append('file', file)
+  
+  // ✅ Add dimensions if available
+  if (width) formData.append('width', width.toString())
+  if (height) formData.append('height', height.toString())
 
-  console.log(`📤 Uploading: ${file.name}`)
+
+  console.log(`📤 Uploading: ${file.name} ${width && height ? `(${width}×${height})` : ''}`)
+
 
   const res = await fetch(`${BASE_URL}/files/upload`, {
     method: 'POST',
     credentials: 'include',
     body: formData,
+    signal,  // ✅ Pass abort signal to fetch
   })
 
+
   console.log(`📥 Upload: ${res.status}`)
+
 
   // Handle 401 - Token expired, try refresh
   if (res.status === 401) {
@@ -107,12 +145,13 @@ export const uploadFile = async (file: File): Promise<any> => {
     const ok = await refreshTokens()
     if (ok) {
       console.log('♻️  Retrying upload...')
-      return uploadFile(file)
+      return uploadFile(file, width, height, signal)  // ✅ Pass signal on retry
     }
     console.log('❌ Refresh failed, redirecting to /login')
     window.location.href = '/login'
     return
   }
+
 
   const data = await res.json()
   if (!res.ok) throw new Error(data.detail ?? 'Upload failed')

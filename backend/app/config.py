@@ -18,7 +18,7 @@ COGNITO_CLIENT_ID = os.getenv("COGNITO_CLIENT_ID")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "False") == "True"
 COOKIE_ENCRYPTION_KEY = os.getenv("COOKIE_ENCRYPTION_KEY")  # ← ADD THIS LINE ONLY
-
+CLOUDFRONT_DOMAIN = os.getenv("CLOUDFRONT_DOMAIN", "") 
 # ── Validate all required vars on startup ──────────────────
 _REQUIRED = [
     "AWS_REGION",

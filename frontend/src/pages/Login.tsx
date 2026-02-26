@@ -253,9 +253,7 @@ export default function Login() {
 
         {/* ── Logo ── */}
         <div className="flex flex-col items-center gap-3 text-center">
-          <div className="w-16 h-16 rounded-full bg-beige flex items-center justify-center">
-            <CloudIcon className="w-8 h-8 text-bg" />
-          </div>
+          <img src="/logo/logo.png" alt="CloudMediaVault" className="w-35 h-35 rounded-full" />
           <h1 className="text-3xl font-bold text-beige">CloudMediaVault</h1>
           <p className="text-muted text-sm">Your personal cloud storage</p>
         </div>

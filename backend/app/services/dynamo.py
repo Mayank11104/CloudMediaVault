@@ -6,9 +6,11 @@ from botocore.exceptions import ClientError
 import uuid
 from app.database import get_table  # ✅ import shared singleton
 
+
 # ── Helpers ────────────────────────────────────────────────
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
 
 def _deserialize(item: dict) -> dict:
     """Convert DynamoDB Decimal → int/float for JSON serialization."""
@@ -19,6 +21,7 @@ def _deserialize(item: dict) -> dict:
         else:
             result[k] = v
     return result
+
 
 def _paginated_query(table, **kwargs) -> list:
     """Paginate through all DynamoDB results (handles > 1 MB responses)."""
@@ -31,6 +34,7 @@ def _paginated_query(table, **kwargs) -> list:
         kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
     return items
 
+
 # ── Create File Record ─────────────────────────────────────
 def create_file(
     user_id:   str,
@@ -39,10 +43,14 @@ def create_file(
     file_type: str,
     file_size: int,
     album_id:  str = None,
+    width:     int = None,    # ✅ Add width
+    height:    int = None,    # ✅ Add height
+    s3_url:    str = None,    # ✅ Add s3_url
 ) -> dict:
     table   = get_table()
     file_id = str(uuid.uuid4())
     now     = _now()
+
 
     item = {
         "user_id":     user_id,
@@ -56,11 +64,21 @@ def create_file(
         "uploaded_at": now,
         "updated_at":  now,
     }
+    
+    # ✅ Add optional fields only if provided
+    if width is not None:
+        item["width"] = width
+    if height is not None:
+        item["height"] = height
+    if s3_url is not None:
+        item["s3_url"] = s3_url
+    
     try:
         table.put_item(Item=item)
     except ClientError:
         raise HTTPException(status_code=500, detail="Failed to save file record")
     return item
+
 
 # ── Get All Files for User ─────────────────────────────────
 def get_user_files(user_id: str, include_deleted: bool = False) -> list:
@@ -74,6 +92,7 @@ def get_user_files(user_id: str, include_deleted: bool = False) -> list:
     items.sort(key=lambda x: x.get("uploaded_at", ""), reverse=True)
     return items
 
+
 # ── Get Single File ────────────────────────────────────────
 def get_file(user_id: str, file_id: str) -> dict:
     table    = get_table()
@@ -82,10 +101,12 @@ def get_file(user_id: str, file_id: str) -> dict:
     except ClientError:
         raise HTTPException(status_code=500, detail="Database error")
 
+
     item = response.get("Item")
     if not item:
         raise HTTPException(status_code=404, detail="File not found")
     return _deserialize(item)
+
 
 # ── Get Files by Type ──────────────────────────────────────
 def get_files_by_type(user_id: str, file_type: str) -> list:
@@ -96,6 +117,7 @@ def get_files_by_type(user_id: str, file_type: str) -> list:
         FilterExpression=Attr("file_type").eq(file_type) & Attr("is_deleted").eq(False),
     )
 
+
 # ── Get Deleted Files (Recycle Bin) ────────────────────────
 def get_deleted_files(user_id: str) -> list:
     table = get_table()
@@ -104,6 +126,7 @@ def get_deleted_files(user_id: str) -> list:
         KeyConditionExpression=Key("user_id").eq(user_id),
         FilterExpression=Attr("is_deleted").eq(True),
     )
+
 
 # ── Soft Delete ────────────────────────────────────────────
 def soft_delete_file(user_id: str, file_id: str) -> dict:
@@ -121,6 +144,7 @@ def soft_delete_file(user_id: str, file_id: str) -> dict:
         raise HTTPException(status_code=500, detail="Failed to delete file")
     return {"message": "File moved to recycle bin"}
 
+
 # ── Restore from Recycle Bin ───────────────────────────────
 def restore_file(user_id: str, file_id: str) -> dict:
     table = get_table()
@@ -137,6 +161,7 @@ def restore_file(user_id: str, file_id: str) -> dict:
         raise HTTPException(status_code=500, detail="Failed to restore file")
     return {"message": "File restored"}
 
+
 # ── Permanent Delete ───────────────────────────────────────
 def delete_file(user_id: str, file_id: str) -> dict:
     table = get_table()
@@ -150,6 +175,7 @@ def delete_file(user_id: str, file_id: str) -> dict:
             raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail="Failed to delete file")
     return {"message": "File permanently deleted"}
+
 
 # ── Update File Name ───────────────────────────────────────
 def update_file_name(user_id: str, file_id: str, new_name: str) -> dict:
@@ -171,6 +197,7 @@ def update_file_name(user_id: str, file_id: str, new_name: str) -> dict:
         raise HTTPException(status_code=500, detail="Failed to rename file")
     return {"message": "File renamed"}
 
+
 # ── Get Storage Stats ──────────────────────────────────────
 def get_storage_stats(user_id: str) -> dict:
     files  = get_user_files(user_id)   # already excludes deleted
@@ -178,6 +205,7 @@ def get_storage_stats(user_id: str) -> dict:
     images = sum(f.get("file_size", 0) for f in files if f.get("file_type") == "image")
     videos = sum(f.get("file_size", 0) for f in files if f.get("file_type") == "video")
     docs   = sum(f.get("file_size", 0) for f in files if f.get("file_type") == "document")
+
 
     return {
         "total_bytes":      total,

@@ -16,11 +16,15 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
 
+
+
 // ── Types ──────────────────────────────────────────────────
 type FileType = 'image' | 'video' | 'document'
 type ViewMode = 'grid' | 'list'
 type SortKey  = 'date' | 'name' | 'size'
 type Filter   = 'all' | FileType
+
+
 
 interface ApiFile {
   file_id:     string
@@ -29,8 +33,13 @@ interface ApiFile {
   file_size:   number
   uploaded_at: string
   s3_key:      string
+  s3_url?:     string
+  width?:      number
+  height?:     number
   is_deleted:  boolean
 }
+
+
 
 // ── Helpers ────────────────────────────────────────────────
 const formatSize = (bytes: number) => {
@@ -38,16 +47,22 @@ const formatSize = (bytes: number) => {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+
+
 const formatDate = (iso: string) =>
   new Date(iso).toLocaleDateString('en-IN', {
     day: 'numeric', month: 'short', year: 'numeric',
   })
+
+
 
 const FILE_ICON: Record<FileType, JSX.Element> = {
   image:    <PhotoIcon        className="w-8 h-8 text-beige-dim" />,
   video:    <FilmIcon         className="w-8 h-8 text-beige-dim" />,
   document: <DocumentTextIcon className="w-8 h-8 text-beige-dim" />,
 }
+
+
 
 const FILTERS: { label: string; value: Filter }[] = [
   { label: 'All',       value: 'all'      },
@@ -56,11 +71,15 @@ const FILTERS: { label: string; value: Filter }[] = [
   { label: 'Documents', value: 'document' },
 ]
 
+
+
 const SORT_OPTIONS: { label: string; value: SortKey }[] = [
   { label: 'Date', value: 'date' },
   { label: 'Name', value: 'name' },
   { label: 'Size', value: 'size' },
 ]
+
+
 
 const FILTER_ROUTES: Record<Filter, string> = {
   all:      '/library',
@@ -69,10 +88,14 @@ const FILTER_ROUTES: Record<Filter, string> = {
   document: '/documents',
 }
 
+
+
 interface LibraryProps {
   presetFilter?: Filter
   pageTitle?:    string
 }
+
+
 
 // ── Main Component ─────────────────────────────────────────
 export default function Library({
@@ -82,6 +105,8 @@ export default function Library({
   const navigate   = useNavigate()
   const sortRef    = useRef<HTMLDivElement>(null)
 
+
+
   const [view,     setView]     = useState<ViewMode>('grid')
   const [filter,   setFilter]   = useState<Filter>(presetFilter)
   const [search,   setSearch]   = useState('')
@@ -90,7 +115,9 @@ export default function Library({
   const [files,    setFiles]    = useState<ApiFile[]>([])
   const [loading,  setLoading]  = useState(true)
   const [error,    setError]    = useState('')
-  const [deleting, setDeleting] = useState<string | null>(null)  // file_id being deleted
+  const [deleting, setDeleting] = useState<string | null>(null)
+
+
 
   // ── Close sort dropdown on outside click ──────────────
   useEffect(() => {
@@ -103,10 +130,14 @@ export default function Library({
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
+
+
   // ── Sync filter tab with presetFilter prop ─────────────
   useEffect(() => {
     setFilter(presetFilter)
   }, [presetFilter])
+
+
 
   // ── Fetch files ────────────────────────────────────────
   const fetchFiles = useCallback(async () => {
@@ -119,6 +150,8 @@ export default function Library({
         presetFilter === 'document' ? '/files/documents' :
         '/files'
 
+
+
       const data = await api(endpoint)
       setFiles(data.files ?? [])
     } catch (e: any) {
@@ -128,7 +161,11 @@ export default function Library({
     }
   }, [presetFilter])
 
+
+
   useEffect(() => { fetchFiles() }, [fetchFiles])
+
+
 
   // ── Filter + Search + Sort (client-side) ───────────────
   const processed = files
@@ -140,6 +177,8 @@ export default function Library({
       if (sort === 'size') return b.file_size - a.file_size
       return 0
     })
+
+
 
   // ── Soft delete → Recycle Bin ──────────────────────────
   const handleDelete = async (e: React.MouseEvent, file_id: string) => {
@@ -155,12 +194,13 @@ export default function Library({
     }
   }
 
+
+
   // ── Download via presigned URL ─────────────────────────
   const handleDownload = async (e: React.MouseEvent, file: ApiFile) => {
     e.stopPropagation()
     try {
       const data = await api(`/files/${file.file_id}`)
-      // Use presigned_url from FileDetail response
       const a    = document.createElement('a')
       a.href     = data.presigned_url
       a.download = file.file_name
@@ -170,6 +210,8 @@ export default function Library({
     }
   }
 
+
+
   // ── Loading state ──────────────────────────────────────
   if (loading) return (
     <div className="min-h-screen bg-main-bg flex items-center justify-center">
@@ -177,6 +219,8 @@ export default function Library({
                       rounded-full animate-spin" />
     </div>
   )
+
+
 
   // ── Error state ────────────────────────────────────────
   if (error) return (
@@ -188,15 +232,49 @@ export default function Library({
     </div>
   )
 
+
+
   // ── Grid Card ──────────────────────────────────────────
-  const GridCard = ({ file }: { file: ApiFile }) => (
+ // ── Grid Card ──────────────────────────────────────────────
+const GridCard = ({ file }: { file: ApiFile }) => {
+  const aspectRatio = file.width && file.height 
+    ? file.width / file.height 
+    : 1
+
+  const isImage = file.file_type === 'image'
+  const isVideo = file.file_type === 'video'
+  const hasThumbnail = file.s3_url && (isImage || isVideo)
+
+  return (
     <div
       onClick={() => navigate(`/files/${file.file_id}`)}
       className="bg-surface border border-border rounded-xl overflow-hidden
-                 cursor-pointer group hover:border-beige/30 transition-all duration-200"
+                 cursor-pointer group hover:border-beige/30 transition-all duration-200
+                 mb-4 break-inside-avoid"
     >
-      <div className="h-36 bg-surface2 flex items-center justify-center relative">
-        {FILE_ICON[file.file_type]}
+      {/* ✅ Image with EXACT aspect ratio */}
+      <div 
+        className="bg-surface2 flex items-center justify-center relative overflow-hidden w-full"
+        style={{ aspectRatio: aspectRatio.toString() }}
+      >
+        {hasThumbnail ? (
+          isImage ? (
+            <img 
+              src={file.s3_url} 
+              alt={file.file_name}
+              className="w-full h-full object-cover"
+              loading="lazy"
+            />
+          ) : (
+            <video 
+              src={file.s3_url}
+              className="w-full h-full object-cover"
+              preload="metadata"
+            />
+          )
+        ) : (
+          FILE_ICON[file.file_type]
+        )}
 
         <div className="absolute inset-0 bg-bg/60 opacity-0 group-hover:opacity-100
                         transition-opacity duration-200
@@ -235,6 +313,10 @@ export default function Library({
       </div>
     </div>
   )
+}
+
+
+
 
   // ── List Row ───────────────────────────────────────────
   const ListRow = ({ file }: { file: ApiFile }) => (
@@ -289,6 +371,8 @@ export default function Library({
       </div>
     </div>
   )
+
+
 
   // ── Render ─────────────────────────────────────────────
   return (
@@ -438,14 +522,14 @@ export default function Library({
       )}
 
       {/* ── Grid View ── */}
-      {view === 'grid' && processed.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4
-                        lg:grid-cols-5 xl:grid-cols-6 gap-4">
-          {processed.map(file => (
-            <GridCard key={file.file_id} file={file} />
-          ))}
-        </div>
-      )}
+     {/* ── Grid View ── */}
+{view === 'grid' && processed.length > 0 && (
+  <div className="columns-2 sm:columns-3 md:columns-4 lg:columns-5 xl:columns-6 gap-4">
+    {processed.map(file => (
+      <GridCard key={file.file_id} file={file} />
+    ))}
+  </div>
+)}
 
       {/* ── List View ── */}
       {view === 'list' && processed.length > 0 && (
