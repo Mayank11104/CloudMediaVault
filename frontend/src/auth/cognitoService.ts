@@ -119,7 +119,11 @@ export const confirmNewPassword = (
   })
 
 // ── Login to Backend (sets httpOnly cookies) ───────────────
-export const loginToBackend = async (tokens: AuthTokens): Promise<void> => {
+// ✨ UPDATED: Now accepts username parameter
+export const loginToBackend = async (
+  tokens: AuthTokens,
+  username: string  // ← NEW PARAMETER
+): Promise<void> => {
   console.log('🔑 Logging in to backend...')
 
   const response = await fetch('http://localhost:8000/auth/login', {
@@ -130,6 +134,7 @@ export const loginToBackend = async (tokens: AuthTokens): Promise<void> => {
       access_token: tokens.accessToken,
       id_token: tokens.idToken,
       refresh_token: tokens.refreshToken,
+      username: username,  // ← SEND USERNAME TO BACKEND
     }),
   })
 

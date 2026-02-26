@@ -57,7 +57,7 @@ export const api = async (
     const ok = await refreshTokens()
     if (ok) {
       console.log('♻️  Retrying request...')
-      return api(endpoint, options, false)  // ✅ _retry=false prevents infinite loop
+      return api(endpoint, options, false)
     } else {
       console.log('❌ Refresh failed, redirecting to /login')
       window.location.href = '/login'
@@ -75,6 +75,15 @@ export const api = async (
 
   if (!res.ok) throw new Error(`Request failed: ${res.status}`)
   return res
+}
+
+// ── Username validation ────────────────────────────────────
+export const checkUsername = async (username: string): Promise<{
+  available: boolean
+  message: string
+}> => {
+  console.log(`🔍 Checking username: ${username}`)
+  return api(`/auth/check-username/${username}`, { method: 'GET' })
 }
 
 // ── File upload ────────────────────────────────────────────

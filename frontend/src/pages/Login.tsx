@@ -1,12 +1,16 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { CloudIcon, EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline'
+import { CloudIcon, EyeIcon, EyeSlashIcon, CheckIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { signIn, signUp, confirmSignUp, resendCode, loginToBackend } from '@/auth/cognitoService'
 import { useAuthStore } from '@/auth/useAuthStore'
+import { checkUsername } from '@/lib/api'
 
 type Screen = 'signin' | 'signup' | 'verify'
 
-// ✅ Move PasswordInput OUTSIDE to prevent re-mounting
+// ── Constants ──────────────────────────────────────────────
+const USERNAME_SUFFIX = '-cloudmediavault'
+
+// ── Password Input Component ──────────────────────────────
 interface PasswordInputProps {
   value: string
   onChange: (value: string) => void
@@ -53,6 +57,13 @@ const PasswordInput = ({
   </div>
 )
 
+// ── Reserved Usernames ─────────────────────────────────────
+const RESERVED_USERNAMES = new Set([
+  'admin', 'root', 'api', 'support', 'help', 'system', 
+  'moderator', 'cdn', 'static', 'username', 'null', 'undefined'
+])
+
+// ── Main Component ─────────────────────────────────────────
 export default function Login() {
   const navigate  = useNavigate()
   const setTokens = useAuthStore(s => s.setTokens)
@@ -61,10 +72,16 @@ export default function Login() {
   const [email,    setEmail]    = useState('')
   const [password, setPassword] = useState('')
   const [name,     setName]     = useState('')
+  const [username, setUsername] = useState('')  // Base username (without suffix)
   const [code,     setCode]     = useState('')
   const [showPass, setShowPass] = useState(false)
   const [loading,  setLoading]  = useState(false)
   const [error,    setError]    = useState('')
+
+  // Username validation state
+  const [usernameError, setUsernameError] = useState('')
+  const [usernameAvailable, setUsernameAvailable] = useState(false)
+  const [isCheckingUsername, setIsCheckingUsername] = useState(false)
 
   const clearError = () => setError('')
 
@@ -72,6 +89,60 @@ export default function Login() {
     setScreen(s)
     setCode('')
     setError('')
+    setUsernameError('')
+  }
+
+  // ✨ Debounced username validation with suffix
+  useEffect(() => {
+    setUsernameError('')
+    setUsernameAvailable(false)
+
+    if (username.length < 3) return
+
+    // Format validation (base username only, without suffix)
+    const usernameRegex = /^[a-z0-9_]{3,20}$/
+    if (!usernameRegex.test(username)) {
+      setUsernameError('Username must be 3-20 characters (lowercase, numbers, _ only)')
+      return
+    }
+
+    // Check reserved usernames
+    if (RESERVED_USERNAMES.has(username.toLowerCase())) {
+      setUsernameError('This username is reserved')
+      return
+    }
+
+    // ✨ Check availability with FULL username (including suffix)
+    const fullUsername = `${username}${USERNAME_SUFFIX}`
+    
+    const timer = setTimeout(async () => {
+      setIsCheckingUsername(true)
+      try {
+        const result = await checkUsername(fullUsername)
+        if (result.available) {
+          setUsernameAvailable(true)
+          setUsernameError('')
+        } else {
+          setUsernameError('Username already taken')
+          setUsernameAvailable(false)
+        }
+      } catch (err: any) {
+        console.error('Username check failed:', err)
+        setUsernameError('Could not check availability')
+      } finally {
+        setIsCheckingUsername(false)
+      }
+    }, 500)
+
+    return () => clearTimeout(timer)
+  }, [username])
+
+  // Username input handler
+  const handleUsernameChange = (value: string) => {
+    // Auto-convert to lowercase and remove invalid characters
+    const cleaned = value.toLowerCase().replace(/[^a-z0-9_]/g, '')
+    setUsername(cleaned)
+    clearError()
   }
 
   // ── Sign In ────────────────────────────────────────────
@@ -80,8 +151,15 @@ export default function Login() {
     setLoading(true); clearError()
     try {
       const tokens = await signIn(email, password)
-      await loginToBackend(tokens)
-      setTokens(tokens)
+      
+      // Backend will fetch username from DynamoDB
+      await loginToBackend(tokens, '')
+      
+      setTokens({ 
+        email: tokens.email, 
+        name: tokens.name,
+        username: ''  // Will be set by backend response
+      })
       
       setPassword('')
       setEmail('')
@@ -100,8 +178,22 @@ export default function Login() {
 
   // ── Sign Up ────────────────────────────────────────────
   const handleSignUp = async () => {
-    if (!email || !password || !name) return setError('Please fill all fields')
-    if (password.length < 8) return setError('Password must be at least 8 characters')
+    if (!email || !password || !name || !username) {
+      return setError('Please fill all fields')
+    }
+    if (password.length < 8) {
+      return setError('Password must be at least 8 characters')
+    }
+    if (username.length < 3) {
+      return setError('Username must be at least 3 characters')
+    }
+    if (usernameError) {
+      return setError('Please fix username errors')
+    }
+    if (!usernameAvailable) {
+      return setError('Username is not available')
+    }
+
     setLoading(true); clearError()
     try {
       await signUp(email, password, name)
@@ -121,12 +213,21 @@ export default function Login() {
     try {
       await confirmSignUp(email, code)
       const tokens = await signIn(email, password)
-      await loginToBackend(tokens)
-      setTokens(tokens)
+      
+      // ✨ Send FULL username with suffix to backend
+      const fullUsername = `${username}${USERNAME_SUFFIX}`
+      await loginToBackend(tokens, fullUsername)
+      
+      setTokens({ 
+        email: tokens.email, 
+        name: tokens.name,
+        username: fullUsername  // ← Store full username with suffix
+      })
       
       setPassword('')
       setEmail('')
       setCode('')
+      setUsername('')
       
       navigate('/library', { replace: true })
     } catch (e: any) {
@@ -235,6 +336,7 @@ export default function Login() {
                   disabled={loading}
                   autoFocus
                 />
+                
                 <input
                   type="email"
                   autoComplete="email"
@@ -244,6 +346,64 @@ export default function Login() {
                   onChange={e => { setEmail(e.target.value); clearError() }}
                   disabled={loading}
                 />
+
+                {/* ✨ Username Input with Fixed Suffix */}
+                <div className="space-y-1">
+                  <label className="text-muted text-sm">Username</label>
+                  
+                  {/* Input Container with Suffix */}
+                  <div className="relative">
+                    <div className="flex items-center input w-full p-0 overflow-hidden">
+                      {/* User Input Part */}
+                      <input
+                        type="text"
+                        autoComplete="username"
+                        className="flex-1 bg-transparent border-none outline-none px-3 py-2
+                                   text-beige placeholder:text-muted/50 focus:ring-0"
+                        placeholder="aditya"
+                        value={username}
+                        onChange={e => handleUsernameChange(e.target.value)}
+                        disabled={loading}
+                        minLength={3}
+                        maxLength={20}
+                      />
+                      
+                      {/* Fixed Suffix */}
+                      <div className="px-3 py-2 text-muted/70 text-sm border-l border-border/50
+                                      bg-border/10 flex items-center gap-2 whitespace-nowrap">
+                        {USERNAME_SUFFIX}
+                        
+                        {/* Status Icons */}
+                        {isCheckingUsername && (
+                          <div className="w-4 h-4 border-2 border-beige/30 border-t-beige
+                                          rounded-full animate-spin" />
+                        )}
+                        {usernameAvailable && !isCheckingUsername && username.length >= 3 && (
+                          <CheckIcon className="w-4 h-4 text-green-400" />
+                        )}
+                        {usernameError && !isCheckingUsername && username.length >= 3 && (
+                          <XMarkIcon className="w-4 h-4 text-red-400" />
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Validation Messages */}
+                  {usernameError && (
+                    <p className="text-red-400 text-xs">{usernameError}</p>
+                  )}
+                  {usernameAvailable && !usernameError && username.length >= 3 && (
+                    <p className="text-green-400 text-xs">
+                      ✓ {username}{USERNAME_SUFFIX} is available
+                    </p>
+                  )}
+                  {username.length === 0 && (
+                    <p className="text-muted text-xs">
+                      3-20 characters, lowercase, numbers, and underscores only
+                    </p>
+                  )}
+                </div>
+
                 <PasswordInput
                   value={password}
                   onChange={setPassword}
@@ -268,7 +428,7 @@ export default function Login() {
 
               <button
                 onClick={handleSignUp}
-                disabled={loading}
+                disabled={loading || !usernameAvailable || !!usernameError}
                 className="btn-primary w-full disabled:opacity-50
                            flex items-center justify-center gap-2"
               >

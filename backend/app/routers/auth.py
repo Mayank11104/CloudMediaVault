@@ -5,17 +5,54 @@ from typing import Optional
 from app.services.cognito import verify_token
 from app.models.user import UserProfileResponse
 from app.database import cognito_client as cognito
-from app.config import COOKIE_SECURE, COGNITO_CLIENT_ID
+from app.config import COOKIE_SECURE, COGNITO_CLIENT_ID, COOKIE_ENCRYPTION_KEY
+from app.schemas.auth import CheckUsernameResponse
+from app.services import users as user_service
+from cryptography.fernet import Fernet
+import re
 
 router = APIRouter()
 
 COOKIE_SAMESITE = "lax"
+
+# ── Cookie Encryption ──────────────────────────────────────
+fernet = Fernet(COOKIE_ENCRYPTION_KEY.encode())
+
+def encrypt_value(value: str) -> str:
+    """Encrypt a value using Fernet"""
+    return fernet.encrypt(value.encode()).decode()
+
+def decrypt_value(encrypted: str) -> str:
+    """Decrypt a value using Fernet"""
+    try:
+        return fernet.decrypt(encrypted.encode()).decode()
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid session")
+
+# ── Username Validation ────────────────────────────────────
+USERNAME_REGEX = re.compile(r'^[a-zA-Z0-9_\-]{3,50}$')  # ← Allows uppercase
+
+def normalize_username(username: str) -> str:
+    """
+    Normalize username to lowercase
+    Call this FIRST before any validation or storage
+    """
+    return username.lower().strip()
+
+def validate_username_format(username: str) -> bool:
+    """
+    Validate username format (after normalization)
+    Allows: letters, numbers, underscores, hyphens
+    Length: 3-50 characters
+    """
+    return bool(USERNAME_REGEX.match(username))
 
 # ── Pydantic models ────────────────────────────────────────
 class TokenPayload(BaseModel):
     access_token: str
     id_token: str
     refresh_token: str
+    username: Optional[str] = None
 
 class UpdateProfileBody(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, strip_whitespace=True)
@@ -26,10 +63,11 @@ class ChangePasswordBody(BaseModel):
 
 # ── Cookie helpers ─────────────────────────────────────────
 def set_auth_cookies(response: Response, access_token: str,
-                     id_token: str, refresh_token: Optional[str] = None):
+                     id_token: str, refresh_token: Optional[str] = None,
+                     username: Optional[str] = None):
     """Set httpOnly cookies - manual approach to ensure all 3 are set"""
     
-    # ✅ Set access_token
+    # Set access_token
     response.set_cookie(
         key="access_token",
         value=access_token,
@@ -40,7 +78,7 @@ def set_auth_cookies(response: Response, access_token: str,
         path="/",
     )
     
-    # ✅ Set id_token
+    # Set id_token
     response.set_cookie(
         key="id_token",
         value=id_token,
@@ -51,7 +89,7 @@ def set_auth_cookies(response: Response, access_token: str,
         path="/",
     )
     
-    # ✅ Set refresh_token
+    # Set refresh_token
     if refresh_token:
         response.set_cookie(
             key="refresh_token",
@@ -62,10 +100,23 @@ def set_auth_cookies(response: Response, access_token: str,
             max_age=30 * 24 * 3600,
             path="/",
         )
+    
+    # Set encrypted username cookie
+    if username:
+        encrypted_username = encrypt_value(username)
+        response.set_cookie(
+            key="username",
+            value=encrypted_username,
+            httponly=True,
+            secure=COOKIE_SECURE,
+            samesite=COOKIE_SAMESITE,
+            max_age=3600,
+            path="/",
+        )
 
 def clear_auth_cookies(response: Response):
     """Clear all auth cookies"""
-    for name in ("access_token", "id_token", "refresh_token"):
+    for name in ("access_token", "id_token", "refresh_token", "username"):
         response.set_cookie(
             key=name,
             value="",
@@ -76,18 +127,76 @@ def clear_auth_cookies(response: Response):
             path="/",
         )
 
+# ── GET /auth/check-username/{username} ────────────────────
+@router.get("/check-username/{username}", response_model=CheckUsernameResponse)
+def check_username_availability(username: str):
+    """Check if username is available"""
+    # ✨ STEP 1: Normalize FIRST (convert to lowercase)
+    username = normalize_username(username)
+    
+    # STEP 2: Validate format
+    if not validate_username_format(username):
+        raise HTTPException(
+            status_code=400,
+            detail="Username must be 3-50 characters (letters, numbers, underscores, hyphens)"
+        )
+    
+    # STEP 3: Check availability
+    is_available = user_service.is_username_available(username)
+    
+    return CheckUsernameResponse(
+        available=is_available,
+        message="Username available" if is_available else "Username already taken"
+    )
+
+# ── POST /auth/login ───────────────────────────────────────
 @router.post("/login")
 def login(payload: TokenPayload):
     """Login endpoint - verifies Cognito tokens and sets httpOnly cookies"""
-    # ✅ Verify access_token (for login validation)
+    # Verify access_token (for login validation)
     user = verify_token(payload.access_token, token_use="access")
+    
+    email = user.get("email")
+    name = user.get("name")
+    user_id = user.get("sub")
+    username = None
+    
+    # Handle username logic
+    if payload.username:
+        # ✨ STEP 1: Normalize FIRST (convert to lowercase)
+        username = normalize_username(payload.username)
+        
+        # STEP 2: Validate format
+        if not validate_username_format(username):
+            raise HTTPException(status_code=400, detail="Invalid username format")
+        
+        # STEP 3: Check availability
+        if not user_service.is_username_available(username):
+            raise HTTPException(status_code=400, detail="Username already taken")
+        
+        # STEP 4: Create user (username already lowercase)
+        try:
+            user_service.create_user(
+                email=email,
+                username=username,
+                user_id=user_id,
+                name=name
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to create user: {str(e)}")
+    else:
+        # Regular login - fetch username from database
+        db_user = user_service.get_user_by_id(user_id)
+        if db_user:
+            username = db_user.get('username')
     
     response = JSONResponse(content={
         "message": "Logged in successfully",
         "user": {
-            "email": user.get("email"),
-            "name": user.get("name"),
-            "sub": user.get("sub"),
+            "email": email,
+            "name": name,
+            "sub": user_id,
+            "username": username,
         },
     })
     
@@ -96,10 +205,12 @@ def login(payload: TokenPayload):
         access_token=payload.access_token,
         id_token=payload.id_token,
         refresh_token=payload.refresh_token,
+        username=username,
     )
     
     return response
 
+# ── GET /auth/me ───────────────────────────────────────────
 @router.get("/me", response_model=UserProfileResponse)
 def me(request: Request):
     """Get current user from httpOnly cookies"""
@@ -109,7 +220,7 @@ def me(request: Request):
     if not id_token:
         raise HTTPException(status_code=401, detail="Not authenticated")
     
-    # ✅ Verify id_token (contains user profile data)
+    # Verify id_token (contains user profile data)
     user = verify_token(id_token, token_use="id")
     
     return UserProfileResponse(
@@ -117,6 +228,7 @@ def me(request: Request):
         name=user.get("name", ""),
         sub=user.get("sub", ""),
     )
+
 # ── POST /auth/logout ──────────────────────────────────────
 @router.post("/logout")
 def logout():
@@ -130,6 +242,7 @@ def logout():
 def refresh(request: Request):
     """Refresh access token using refresh token"""
     refresh_token = request.cookies.get("refresh_token")
+    encrypted_username = request.cookies.get("username")
     
     if not refresh_token:
         raise HTTPException(status_code=401, detail="No refresh token")
@@ -142,11 +255,15 @@ def refresh(request: Request):
         )
         tokens = result['AuthenticationResult']
         
+        # Decrypt username to re-set in new cookie
+        username = decrypt_value(encrypted_username) if encrypted_username else None
+        
         response = JSONResponse(content={"message": "Token refreshed successfully"})
         set_auth_cookies(
             response,
             access_token=tokens['AccessToken'],
             id_token=tokens['IdToken'],
+            username=username
         )
         return response
 

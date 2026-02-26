@@ -5,13 +5,14 @@ import { api } from '@/lib/api'
 interface User {
   email: string
   name: string
+  username: string  // ← NEW FIELD
   sub: string
 }
 
 interface AuthState {
   user: User | null
   setUser: (user: User) => void
-  setTokens: (tokens: { email: string; name: string }) => void
+  setTokens: (tokens: { email: string; name: string; username: string }) => void  // ← UPDATED
   logout: () => Promise<void>
 }
 
@@ -27,6 +28,7 @@ export const useAuthStore = create<AuthState>()(
           user: {
             email: tokens.email,
             name: tokens.name,
+            username: tokens.username,  // ← NEW FIELD
             sub: '',
           },
         }),
