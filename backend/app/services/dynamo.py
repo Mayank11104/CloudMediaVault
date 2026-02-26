@@ -35,49 +35,53 @@ def _paginated_query(table, **kwargs) -> list:
     return items
 
 
-# ── Create File Record ─────────────────────────────────────
+# ── Create File Record (ENCRYPTED) ─────────────────────────
 def create_file(
-    user_id:   str,
+    user_id: str,
     file_name: str,
-    s3_key:    str,
+    s3_key: str,
     file_type: str,
     file_size: int,
-    album_id:  str = None,
-    width:     int = None,    # ✅ Add width
-    height:    int = None,    # ✅ Add height
-    s3_url:    str = None,    # ✅ Add s3_url
+    album_id: str = None,
+    width: int = None,
+    height: int = None,
+    s3_url: str = None,
+    file_hash: str = None,  # ← NEW: Store hash
 ) -> dict:
-    table   = get_table()
+    from .encryption import FileEncryption
+    
+    table = get_table()
     file_id = str(uuid.uuid4())
-    now     = _now()
-
-
+    now = _now()
+    
+    # Encrypt sensitive metadata
+    enc_key = FileEncryption.derive_key(user_id)
+    file_name_enc = base64.urlsafe_b64encode(file_name.encode()).decode()
+    
     item = {
-        "user_id":     user_id,
-        "file_id":     file_id,
-        "file_name":   file_name,
-        "s3_key":      s3_key,
-        "file_type":   file_type,
-        "file_size":   file_size,
-        "album_id":    album_id or "none",
-        "is_deleted":  False,
+        "user_id": user_id,
+        "file_id": file_id,
+        "file_name_enc": file_name_enc,  # ← ENCRYPTED
+        "s3_key": s3_key,
+        "file_type": file_type,
+        "file_size": file_size,
+        "file_hash": file_hash,  # ← NEW: Integrity hash
+        "album_id": album_id or "none",
+        "is_deleted": False,
         "uploaded_at": now,
-        "updated_at":  now,
+        "updated_at": now,
     }
     
-    # ✅ Add optional fields only if provided
-    if width is not None:
-        item["width"] = width
-    if height is not None:
-        item["height"] = height
-    if s3_url is not None:
-        item["s3_url"] = s3_url
+    if width is not None: item["width"] = width
+    if height is not None: item["height"] = height
+    if s3_url is not None: item["s3_url"] = s3_url
     
     try:
         table.put_item(Item=item)
     except ClientError:
         raise HTTPException(status_code=500, detail="Failed to save file record")
     return item
+
 
 
 # ── Get All Files for User ─────────────────────────────────

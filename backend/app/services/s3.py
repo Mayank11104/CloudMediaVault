@@ -6,23 +6,34 @@ from app.database import s3_client as _s3
 from app.config import S3_BUCKET_NAME as BUCKET, AWS_REGION
 
 
-# ── Upload File ────────────────────────────────────────────
+# ── Upload File (ENCRYPTED) ─────────────────────────────────
 def upload_file(
-    file_bytes:   bytes,
-    s3_key:       str,
+    file_bytes: bytes,
+    s3_key: str,
     content_type: str,
+    user_id: str,  # ← NEW: Add user_id
 ) -> str:
+    from .encryption import FileEncryption
+    
+    # Encrypt file + get hash
+    encrypted_bytes, file_hash = FileEncryption.encrypt_file(file_bytes, user_id)
+    
     try:
         _s3.put_object(
             Bucket=BUCKET,
             Key=s3_key,
-            Body=file_bytes,
+            Body=encrypted_bytes,
             ContentType=content_type,
             ServerSideEncryption="AES256",
+            Metadata={  # ← NEW: Store hash for verification
+                "sha256-hash": file_hash,
+                "encryption": "aesgcm-v1",
+            },
         )
         return s3_key
     except ClientError:
         raise HTTPException(status_code=500, detail="Failed to upload file")
+
 
 
 # ── Generate Presigned URL ─────────────────────────────────

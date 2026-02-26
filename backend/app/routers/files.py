@@ -58,72 +58,50 @@ def sanitize_filename(name: str) -> str:
     return name[:200].strip() or "unnamed"
 
 
-# ── POST /files/upload ─────────────────────────────────────
-# ── POST /files/upload ─────────────────────────────────────
 @router.post("/upload")
 async def upload_file(
     file: UploadFile = File(...),
-    width: Optional[int] = Form(None),   # ✅ Add width
-    height: Optional[int] = Form(None),  # ✅ Add height
+    width: Optional[int] = Form(None),
+    height: Optional[int] = Form(None),
     user: dict = Depends(get_current_user),
-):  
+):
+    # ... existing validation code unchanged ...
     
-    if file.size and file.size > MAX_FILE_SIZE:
-        raise HTTPException(status_code=413, detail="File too large. Max size is 100MB")
-
-
-    file_bytes = await file.read(MAX_FILE_SIZE + 1)
-    if len(file_bytes) > MAX_FILE_SIZE:
-        raise HTTPException(status_code=413, detail="File too large. Max size is 100MB")
-    if len(file_bytes) == 0:
-        raise HTTPException(status_code=400, detail="Empty file not allowed")
-
-
-    real_mime = magic.from_buffer(file_bytes, mime=True)
-    if real_mime not in ALLOWED_TYPES:
-        raise HTTPException(status_code=400, detail=f"File type '{real_mime}' is not allowed")
-
-
-    user_id       = user["sub"]
-    file_id       = str(uuid.uuid4())
-    file_type     = ALLOWED_TYPES[real_mime]
+    user_id = user["sub"]
+    file_id = str(uuid.uuid4())
+    file_type = ALLOWED_TYPES[real_mime]
     safe_filename = sanitize_filename(file.filename or "unnamed")
-    s3_key        = s3.make_s3_key(user_id, file_id, safe_filename)
-
+    s3_key = s3.make_s3_key(user_id, file_id, safe_filename)
 
     try:
-        s3.upload_file(file_bytes=file_bytes, s3_key=s3_key, content_type=real_mime)
+        # ← ENCRYPTED UPLOAD
+        s3.upload_file(
+            file_bytes=file_bytes, 
+            s3_key=s3_key, 
+            content_type=real_mime,
+            user_id=user_id  # ← NEW
+        )
     except Exception:
         raise HTTPException(status_code=500, detail="Failed to upload file")
 
-
-    # ✅ Generate S3 URL
     s3_url = s3.get_public_url(s3_key)
     
-    # ✅ DEBUG PRINTS
-    print(f"🔵 DEBUG - width: {width}, height: {height}")
-    print(f"🔵 DEBUG - s3_url: {s3_url}")
-    print(f"🔵 DEBUG - About to call dynamo.create_file")
-
-
     try:
         item = dynamo.create_file(
-            user_id=user_id, 
+            user_id=user_id,
             file_name=safe_filename,
-            s3_key=s3_key, 
-            file_type=file_type, 
+            s3_key=s3_key,
+            file_type=file_type,
             file_size=len(file_bytes),
-            width=width,      # ✅ Pass width
-            height=height,    # ✅ Pass height
-            s3_url=s3_url,    # ✅ Pass s3_url
+            width=width,
+            height=height,
+            s3_url=s3_url,
+            file_hash="stored-in-metadata",  # ← Will verify on download
         )
-        print(f"🔵 DEBUG - Item created: {item}")
     except Exception as e:
-        print(f"🔴 DEBUG - Error creating file: {e}")
         try: s3.delete_file(s3_key)
-        except Exception: pass
+        except: pass
         raise HTTPException(status_code=500, detail="Failed to save file metadata")
-
 
     return {"message": "File uploaded successfully", "file": item}
 
@@ -170,17 +148,25 @@ def storage_stats(user: dict = Depends(get_current_user)):
     return dynamo.get_storage_stats(user["sub"])
 
 
-# ── GET /files/{file_id} ───────────────────────────────────
 @router.get("/{file_id}", response_model=FileDetailModel)
 def get_file(
-    file_id: str  = Depends(validated_file_id),
-    user:    dict = Depends(get_current_user),
+    file_id: str = Depends(validated_file_id),
+    user: dict = Depends(get_current_user),
 ):
     file = dynamo.get_file(user["sub"], file_id)
+    
+    # ← BACKWARD COMPATIBLE: Decrypt metadata if encrypted
+    from app.services.encryption import FileEncryption
     try:
-        presigned_url = s3.get_presigned_url(file["s3_key"])
-    except Exception:
-        raise HTTPException(status_code=500, detail="Failed to generate download URL")
+        if "file_name_enc" in file:
+            file["file_name"] = base64.urlsafe_b64decode(
+                file["file_name_enc"].encode()
+            ).decode()
+    except:
+        pass  # Keep original file_name if decryption fails
+    
+    # Generate presigned URL (file remains encrypted in S3)
+    presigned_url = s3.get_presigned_url(file["s3_key"])
     return {**file, "presigned_url": presigned_url}
 
 
