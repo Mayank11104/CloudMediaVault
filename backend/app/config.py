@@ -15,7 +15,7 @@ COGNITO_USER_POOL_ID = os.getenv("COGNITO_USER_POOL_ID")
 COGNITO_CLIENT_ID = os.getenv("COGNITO_CLIENT_ID")
 
 # ── App ────────────────────────────────────────────────────
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://d2zi12cq7o7ep8.cloudfront.net/")
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "False") == "True"
 COOKIE_ENCRYPTION_KEY = os.getenv("COOKIE_ENCRYPTION_KEY")  # ← ADD THIS LINE ONLY
 CLOUDFRONT_DOMAIN = os.getenv("CLOUDFRONT_DOMAIN", "") 
