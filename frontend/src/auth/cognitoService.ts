@@ -126,7 +126,7 @@ export const loginToBackend = async (
 ): Promise<void> => {
   console.log('🔑 Logging in to backend...')
 
-  const response = await fetch('https://54.246.57.249/auth/login', {
+  const response = await fetch('/api/auth/login', {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
