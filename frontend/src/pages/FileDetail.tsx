@@ -17,7 +17,7 @@ import {
   CheckIcon,
 } from '@heroicons/react/24/outline'
 import { api } from '@/lib/api'
-
+import type { ReactNode } from 'react'
 // ── Types ──────────────────────────────────────────────────
 type FileType = 'image' | 'video' | 'document'
 
@@ -99,8 +99,12 @@ function FilePreview({ file }: { file: FileData }) {
 }
 
 // ── Info Card ──────────────────────────────────────────────
-function InfoCard({ icon, label, value }: {
-  icon:  JSX.Element
+function InfoCard({
+  icon,
+  label,
+  value,
+}: {
+  icon: ReactNode
   label: string
   value: string
 }) {
@@ -426,7 +430,7 @@ export default function FileDetail() {
     </div>
   )
 
-  const TYPE_ICON: Record<FileType, JSX.Element> = {
+ const TYPE_ICON: Record<FileType, ReactNode> = {
     image:    <PhotoIcon        className="w-6 h-6 text-beige-dim" />,
     video:    <FilmIcon         className="w-6 h-6 text-beige-dim" />,
     document: <DocumentTextIcon className="w-6 h-6 text-beige-dim" />,

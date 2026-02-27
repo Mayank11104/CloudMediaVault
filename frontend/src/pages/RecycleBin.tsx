@@ -11,7 +11,7 @@ import {
   ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline'
 import { api } from '@/lib/api'
-
+import type { ReactNode } from 'react'
 // ── Types ──────────────────────────────────────────────────
 type FileType = 'image' | 'video' | 'document'
 type ViewMode = 'grid' | 'list'
@@ -49,7 +49,7 @@ const daysColor = (days: number) => {
   return 'text-muted bg-surface2 border-border'
 }
 
-const FILE_ICON: Record<FileType, JSX.Element> = {
+const FILE_ICON: Record<FileType, ReactNode> = {
   image:    <PhotoIcon        className="w-5 h-5 text-beige-dim" />,
   video:    <FilmIcon         className="w-5 h-5 text-beige-dim" />,
   document: <DocumentTextIcon className="w-5 h-5 text-beige-dim" />,

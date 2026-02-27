@@ -19,7 +19,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { useAuthStore } from '@/auth/useAuthStore'
 import { api } from '@/lib/api'
-
+import type { ReactNode } from 'react'
 // ── Types ──────────────────────────────────────────────────
 type Tab = 'profile' | 'security' | 'storage'
 
@@ -480,7 +480,7 @@ function StorageTab() {
         <h3 className="text-beige font-semibold mb-5">Breakdown by Type</h3>
 
         <div className="space-y-4">
-          {breakdown.map((item, i) => (
+          {breakdown.map((item) => (
             <div key={item.label}>
               <div className="flex items-center justify-between mb-1.5">
                 <div className="flex items-center gap-2 text-beige-dim">
@@ -588,7 +588,7 @@ export default function Profile() {
     }
   }
 
-  const TABS: { key: Tab; label: string; icon: JSX.Element }[] = [
+  const TABS: { key: Tab; label: string; icon: ReactNode }[] = [
     { key: 'profile',  label: 'Profile',  icon: <UserCircleIcon  className="w-4 h-4" /> },
     { key: 'security', label: 'Security', icon: <ShieldCheckIcon className="w-4 h-4" /> },
     { key: 'storage',  label: 'Storage',  icon: <CloudIcon       className="w-4 h-4" /> },

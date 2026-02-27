@@ -1,9 +1,8 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback} from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useDropzone } from 'react-dropzone'
 import {
   CloudArrowUpIcon,
-  PhotoIcon,
   FilmIcon,
   DocumentTextIcon,
   XMarkIcon,
@@ -94,16 +93,6 @@ const getImageDimensions = (file: File): Promise<{
     reader.readAsDataURL(file)
   })
 }
-
-
-
-const FILE_ICON: Record<string, JSX.Element> = {
-  image:    <PhotoIcon        className="w-5 h-5 text-beige-dim" />,
-  video:    <FilmIcon         className="w-5 h-5 text-beige-dim" />,
-  document: <DocumentTextIcon className="w-5 h-5 text-beige-dim" />,
-}
-
-
 
 const STATUS_COLORS: Record<Status, string> = {
   pending:   'text-muted',

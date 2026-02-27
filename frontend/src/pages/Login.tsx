@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { CloudIcon, EyeIcon, EyeSlashIcon, CheckIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import { EyeIcon, EyeSlashIcon, CheckIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { signIn, signUp, confirmSignUp, resendCode, loginToBackend } from '@/auth/cognitoService'
 import { useAuthStore } from '@/auth/useAuthStore'
 import { checkUsername } from '@/lib/api'

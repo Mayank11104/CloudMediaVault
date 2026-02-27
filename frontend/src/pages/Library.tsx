@@ -16,7 +16,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
 
-
+import type { ReactElement , SVGProps } from 'react'
 
 // ── Types ──────────────────────────────────────────────────
 type FileType = 'image' | 'video' | 'document'
@@ -56,12 +56,14 @@ const formatDate = (iso: string) =>
 
 
 
-const FILE_ICON: Record<FileType, JSX.Element> = {
-  image:    <PhotoIcon        className="w-8 h-8 text-beige-dim" />,
-  video:    <FilmIcon         className="w-8 h-8 text-beige-dim" />,
+const FILE_ICON: Record<
+  FileType,
+  ReactElement<SVGProps<SVGSVGElement>>
+> = {
+  image:    <PhotoIcon className="w-8 h-8 text-beige-dim" />,
+  video:    <FilmIcon className="w-8 h-8 text-beige-dim" />,
   document: <DocumentTextIcon className="w-8 h-8 text-beige-dim" />,
 }
-
 
 
 const FILTERS: { label: string; value: Filter }[] = [

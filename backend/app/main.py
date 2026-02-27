@@ -21,10 +21,14 @@ app.add_middleware(SlowAPIMiddleware)
 # ── CORS ───────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[
+        "http://localhost:5173",                    # Vite dev
+        "https://d1wujzujzktfpn.cloudfront.net/login",  # Production frontend
+                   # Replace with YOUR domain
+    ],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["*"],  # ✅ Changed from ["Content-Type"] to ["*"]
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # ── Body Size Limit Middleware ─────────────────────────────
