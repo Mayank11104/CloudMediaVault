@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
-  CloudIcon,
   FolderIcon,
   ArrowUpTrayIcon,
   PhotoIcon,
@@ -13,11 +12,6 @@ import {
 } from '@heroicons/react/24/outline'
 import { api } from '@/lib/api'
 
-// ── Types ──────────────────────────────────────────────────
-interface StorageInfo {
-  total_bytes: number
-  plan_bytes:  number   // e.g. 10 GB plan
-}
 
 // ── Nav config ─────────────────────────────────────────────
 const NAV_SECTIONS = [
@@ -94,7 +88,7 @@ export default function Sidebar() {
       >
         <img src="/logo/logo.png" alt="CloudMediaVault" className="w-14 h-14 rounded-full" />
         <span className="text-beige font-bold text-[25px] leading-tight tracking-tight">
-          CloudMediaVault
+          CloudMediaVault---
         </span>
       </div>
 
