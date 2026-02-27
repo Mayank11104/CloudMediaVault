@@ -27,7 +27,7 @@ jobs:
           echo "VITE_API_URL=$VITE_API_URL" >> .env.production
           echo "VITE_COGNITO_USER_POOL_ID=$VITE_COGNITO_USER_POOL_ID" >> .env.production
           echo "VITE_COGNITO_CLIENT_ID=$VITE_COGNITO_CLIENT_ID" >> .env.production
-          npm ci
+          npm install
           npm run build
         env:
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
