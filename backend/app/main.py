@@ -22,9 +22,8 @@ app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:5173",                    # Vite dev
-        "https://d1wujzujzktfpn.cloudfront.net/login",  # Production frontend
-                   # Replace with YOUR domain
+        "http://localhost:5173",                  
+        "https://d2zi12cq7o7ep8.cloudfront.net"
     ],
     allow_credentials=True,
     allow_methods=["*"],

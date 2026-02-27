@@ -1,0 +1,11 @@
+version: '3.8'
+services:
+  fastapi:
+    build: .
+    ports:
+      - "8000:80"
+    restart: always
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - .:/app  # Hot reload during dev

@@ -1,7 +1,6 @@
 import os
 import re
 import uuid
-import magic
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Path, Form
 from typing import Optional
 from pydantic import BaseModel, Field
