@@ -88,7 +88,7 @@ export default function Sidebar() {
       >
         <img src="/logo/logo.png" alt="CloudMediaVault" className="w-14 h-14 rounded-full" />
         <span className="text-beige font-bold text-[25px] leading-tight tracking-tight">
-          CloudMediaVaultttt
+          CloudMediaVault
         </span>
       </div>
 
