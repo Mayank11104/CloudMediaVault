@@ -7,6 +7,7 @@ from app.database import s3_client as _s3
 from app.config import S3_BUCKET_NAME as BUCKET, AWS_REGION
 
 
+
 # ── Upload File (ENCRYPTED) ─────────────────────────────────
 def upload_file(
     file_bytes: bytes,
@@ -16,16 +17,16 @@ def upload_file(
 ) -> str:
     """
     Upload and encrypt a file to S3.
-    
+
     Args:
         file_bytes: Raw file content
         s3_key: S3 object key
         content_type: MIME type
         user_id: User's Cognito sub for encryption
-        
+
     Returns:
         str: SHA256 hash of the original file
-        
+
     Raises:
         HTTPException: If S3 upload fails
     """
@@ -57,6 +58,34 @@ def upload_file(
     return file_hash
 
 
+# ── Download File (RAW ENCRYPTED BYTES) ────────────────────
+def download_file(s3_key: str) -> bytes:
+    """
+    Download raw encrypted bytes from S3.
+    Decryption is handled by the caller (FileEncryption.decrypt_file).
+
+    Args:
+        s3_key: S3 object key
+
+    Returns:
+        bytes: Raw encrypted file content
+
+    Raises:
+        HTTPException: If file not found or download fails
+    """
+    try:
+        response = _s3.get_object(Bucket=BUCKET, Key=s3_key)
+        return response["Body"].read()
+    except ClientError as e:
+        code = e.response["Error"]["Code"]
+        if code in ("404", "NoSuchKey"):
+            raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to download file from storage",
+        )
+
+
 # ── Generate Presigned URL ─────────────────────────────────
 def get_presigned_url(
     s3_key: str,
@@ -65,15 +94,15 @@ def get_presigned_url(
 ) -> str:
     """
     Generate a presigned URL for downloading a file.
-    
+
     Args:
         s3_key: S3 object key
         expires_in: URL expiration time in seconds (default 15 minutes)
         filename: Optional filename for Content-Disposition header
-        
+
     Returns:
         str: Presigned URL
-        
+
     Raises:
         HTTPException: If URL generation fails
     """
@@ -102,10 +131,10 @@ def get_presigned_url(
 def get_public_url(s3_key: str) -> str:
     """
     Get public URL for a file (CloudFront if configured, otherwise S3).
-    
+
     Args:
         s3_key: S3 object key
-        
+
     Returns:
         str: Public URL
     """
@@ -121,10 +150,10 @@ def get_public_url(s3_key: str) -> str:
 def delete_file(s3_key: str) -> None:
     """
     Delete a file from S3.
-    
+
     Args:
         s3_key: S3 object key
-        
+
     Raises:
         HTTPException: If deletion fails
     """
@@ -141,12 +170,12 @@ def delete_file(s3_key: str) -> None:
 def make_s3_key(username: str, file_id: str, file_name: str) -> str:
     """
     Generate S3 key for a file.
-    
+
     Args:
         username: User's username
         file_id: File's unique identifier
         file_name: Original filename
-        
+
     Returns:
         str: S3 object key in format: users/{username}/{file_id}/{filename}
     """
@@ -158,13 +187,13 @@ def make_s3_key(username: str, file_id: str, file_name: str) -> str:
 def get_file_size(s3_key: str) -> int:
     """
     Get the size of a file in S3.
-    
+
     Args:
         s3_key: S3 object key
-        
+
     Returns:
         int: File size in bytes
-        
+
     Raises:
         HTTPException: If file not found or retrieval fails
     """

@@ -16,15 +16,13 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
 
-import type { ReactElement , SVGProps } from 'react'
+import type { ReactElement, SVGProps } from 'react'
 
 // ── Types ──────────────────────────────────────────────────
 type FileType = 'image' | 'video' | 'document'
 type ViewMode = 'grid' | 'list'
 type SortKey  = 'date' | 'name' | 'size'
 type Filter   = 'all' | FileType
-
-
 
 interface ApiFile {
   file_id:     string
@@ -39,22 +37,16 @@ interface ApiFile {
   is_deleted:  boolean
 }
 
-
-
 // ── Helpers ────────────────────────────────────────────────
 const formatSize = (bytes: number) => {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-
-
 const formatDate = (iso: string) =>
   new Date(iso).toLocaleDateString('en-IN', {
     day: 'numeric', month: 'short', year: 'numeric',
   })
-
-
 
 const FILE_ICON: Record<
   FileType,
@@ -65,7 +57,6 @@ const FILE_ICON: Record<
   document: <DocumentTextIcon className="w-8 h-8 text-beige-dim" />,
 }
 
-
 const FILTERS: { label: string; value: Filter }[] = [
   { label: 'All',       value: 'all'      },
   { label: 'Photos',    value: 'image'    },
@@ -73,15 +64,11 @@ const FILTERS: { label: string; value: Filter }[] = [
   { label: 'Documents', value: 'document' },
 ]
 
-
-
 const SORT_OPTIONS: { label: string; value: SortKey }[] = [
   { label: 'Date', value: 'date' },
   { label: 'Name', value: 'name' },
   { label: 'Size', value: 'size' },
 ]
-
-
 
 const FILTER_ROUTES: Record<Filter, string> = {
   all:      '/library',
@@ -90,24 +77,18 @@ const FILTER_ROUTES: Record<Filter, string> = {
   document: '/documents',
 }
 
-
-
 interface LibraryProps {
   presetFilter?: Filter
   pageTitle?:    string
 }
-
-
 
 // ── Main Component ─────────────────────────────────────────
 export default function Library({
   presetFilter = 'all',
   pageTitle    = 'Library',
 }: LibraryProps) {
-  const navigate   = useNavigate()
-  const sortRef    = useRef<HTMLDivElement>(null)
-
-
+  const navigate = useNavigate()
+  const sortRef  = useRef<HTMLDivElement>(null)
 
   const [view,     setView]     = useState<ViewMode>('grid')
   const [filter,   setFilter]   = useState<Filter>(presetFilter)
@@ -118,8 +99,6 @@ export default function Library({
   const [loading,  setLoading]  = useState(true)
   const [error,    setError]    = useState('')
   const [deleting, setDeleting] = useState<string | null>(null)
-
-
 
   // ── Close sort dropdown on outside click ──────────────
   useEffect(() => {
@@ -132,14 +111,10 @@ export default function Library({
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-
-
   // ── Sync filter tab with presetFilter prop ─────────────
   useEffect(() => {
     setFilter(presetFilter)
   }, [presetFilter])
-
-
 
   // ── Fetch files ────────────────────────────────────────
   const fetchFiles = useCallback(async () => {
@@ -152,8 +127,6 @@ export default function Library({
         presetFilter === 'document' ? '/files/documents' :
         '/files'
 
-
-
       const data = await api(endpoint)
       setFiles(data.files ?? [])
     } catch (e: any) {
@@ -163,11 +136,7 @@ export default function Library({
     }
   }, [presetFilter])
 
-
-
   useEffect(() => { fetchFiles() }, [fetchFiles])
-
-
 
   // ── Filter + Search + Sort (client-side) ───────────────
   const processed = files
@@ -179,8 +148,6 @@ export default function Library({
       if (sort === 'size') return b.file_size - a.file_size
       return 0
     })
-
-
 
   // ── Soft delete → Recycle Bin ──────────────────────────
   const handleDelete = async (e: React.MouseEvent, file_id: string) => {
@@ -196,23 +163,16 @@ export default function Library({
     }
   }
 
-
-
-  // ── Download via presigned URL ─────────────────────────
-  const handleDownload = async (e: React.MouseEvent, file: ApiFile) => {
+  // ── Download via /download endpoint (decrypted) ────────
+  // 🔴 OLD: fetched presigned_url (returned encrypted bytes)
+  // ✅ NEW: hits /download endpoint which decrypts on backend
+  const handleDownload = (e: React.MouseEvent, file: ApiFile) => {
     e.stopPropagation()
-    try {
-      const data = await api(`/files/${file.file_id}`)
-      const a    = document.createElement('a')
-      a.href     = data.presigned_url
-      a.download = file.file_name
-      a.click()
-    } catch (e: any) {
-      alert(e.message ?? 'Download failed')
-    }
+    const a    = document.createElement('a')
+    a.href     = `/api/files/${file.file_id}/download`
+    a.download = file.file_name
+    a.click()
   }
-
-
 
   // ── Loading state ──────────────────────────────────────
   if (loading) return (
@@ -221,8 +181,6 @@ export default function Library({
                       rounded-full animate-spin" />
     </div>
   )
-
-
 
   // ── Error state ────────────────────────────────────────
   if (error) return (
@@ -234,91 +192,88 @@ export default function Library({
     </div>
   )
 
-
-
   // ── Grid Card ──────────────────────────────────────────
- // ── Grid Card ──────────────────────────────────────────────
-const GridCard = ({ file }: { file: ApiFile }) => {
-  const aspectRatio = file.width && file.height 
-    ? file.width / file.height 
-    : 1
+  const GridCard = ({ file }: { file: ApiFile }) => {
+    const aspectRatio = file.width && file.height
+      ? file.width / file.height
+      : 1
 
-  const isImage = file.file_type === 'image'
-  const isVideo = file.file_type === 'video'
-  const hasThumbnail = file.s3_url && (isImage || isVideo)
+    const isImage = file.file_type === 'image'
+    const isVideo = file.file_type === 'video'
 
-  return (
-    <div
-      onClick={() => navigate(`/files/${file.file_id}`)}
-      className="bg-surface border border-border rounded-xl overflow-hidden
-                 cursor-pointer group hover:border-beige/30 transition-all duration-200
-                 mb-4 break-inside-avoid"
-    >
-      {/* ✅ Image with EXACT aspect ratio */}
-      <div 
-        className="bg-surface2 flex items-center justify-center relative overflow-hidden w-full"
-        style={{ aspectRatio: aspectRatio.toString() }}
+    // 🔴 OLD: src={file.s3_url} → encrypted bytes, browser couldn't render
+    // ✅ NEW: src=/api/files/{id}/preview → backend decrypts before streaming
+    const previewSrc = `/api/files/${file.file_id}/preview`
+    const hasThumbnail = isImage || isVideo
+
+    return (
+      <div
+        onClick={() => navigate(`/files/${file.file_id}`)}
+        className="bg-surface border border-border rounded-xl overflow-hidden
+                   cursor-pointer group hover:border-beige/30 transition-all duration-200
+                   mb-4 break-inside-avoid"
       >
-        {hasThumbnail ? (
-          isImage ? (
-            <img 
-              src={file.s3_url} 
-              alt={file.file_name}
-              className="w-full h-full object-cover"
-              loading="lazy"
-            />
+        <div
+          className="bg-surface2 flex items-center justify-center relative overflow-hidden w-full"
+          style={{ aspectRatio: aspectRatio.toString() }}
+        >
+          {hasThumbnail ? (
+            isImage ? (
+              <img
+                src={previewSrc}
+                alt={file.file_name}
+                className="w-full h-full object-cover"
+                loading="lazy"
+              />
+            ) : (
+              <video
+                src={previewSrc}
+                className="w-full h-full object-cover"
+                preload="metadata"
+              />
+            )
           ) : (
-            <video 
-              src={file.s3_url}
-              className="w-full h-full object-cover"
-              preload="metadata"
-            />
-          )
-        ) : (
-          FILE_ICON[file.file_type]
-        )}
+            FILE_ICON[file.file_type]
+          )}
 
-        <div className="absolute inset-0 bg-bg/60 opacity-0 group-hover:opacity-100
-                        transition-opacity duration-200
-                        flex items-center justify-center gap-3">
-          <button
-            onClick={e => handleDownload(e, file)}
-            className="w-9 h-9 rounded-full bg-beige flex items-center
-                       justify-center hover:bg-beige-dim transition-colors"
-            title="Download"
-          >
-            <ArrowDownTrayIcon className="w-4 h-4 text-bg" />
-          </button>
-          <button
-            onClick={e => handleDelete(e, file.file_id)}
-            disabled={deleting === file.file_id}
-            className="w-9 h-9 rounded-full bg-surface border border-red-800
-                       flex items-center justify-center
-                       hover:bg-red-900/40 transition-colors disabled:opacity-50"
-            title="Delete"
-          >
-            {deleting === file.file_id
-              ? <div className="w-3.5 h-3.5 border border-red-400 border-t-transparent
-                                rounded-full animate-spin" />
-              : <TrashIcon className="w-4 h-4 text-red-400" />
-            }
-          </button>
+          <div className="absolute inset-0 bg-bg/60 opacity-0 group-hover:opacity-100
+                          transition-opacity duration-200
+                          flex items-center justify-center gap-3">
+            <button
+              onClick={e => handleDownload(e, file)}
+              className="w-9 h-9 rounded-full bg-beige flex items-center
+                         justify-center hover:bg-beige-dim transition-colors"
+              title="Download"
+            >
+              <ArrowDownTrayIcon className="w-4 h-4 text-bg" />
+            </button>
+            <button
+              onClick={e => handleDelete(e, file.file_id)}
+              disabled={deleting === file.file_id}
+              className="w-9 h-9 rounded-full bg-surface border border-red-800
+                         flex items-center justify-center
+                         hover:bg-red-900/40 transition-colors disabled:opacity-50"
+              title="Delete"
+            >
+              {deleting === file.file_id
+                ? <div className="w-3.5 h-3.5 border border-red-400 border-t-transparent
+                                  rounded-full animate-spin" />
+                : <TrashIcon className="w-4 h-4 text-red-400" />
+              }
+            </button>
+          </div>
+        </div>
+
+        <div className="px-3 py-2.5">
+          <p className="text-beige text-sm font-medium truncate">{file.file_name}</p>
+          <div className="flex items-center justify-between mt-0.5">
+            <p className="text-muted text-xs">{formatDate(file.uploaded_at)}</p>
+            <p className="text-muted text-xs">{formatSize(file.file_size)}</p>
+          </div>
         </div>
       </div>
-
-      <div className="px-3 py-2.5">
-        <p className="text-beige text-sm font-medium truncate">{file.file_name}</p>
-        <div className="flex items-center justify-between mt-0.5">
-          <p className="text-muted text-xs">{formatDate(file.uploaded_at)}</p>
-          <p className="text-muted text-xs">{formatSize(file.file_size)}</p>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-
-
+    )
+  }
 
   // ── List Row ───────────────────────────────────────────
   const ListRow = ({ file }: { file: ApiFile }) => (
@@ -373,8 +328,6 @@ const GridCard = ({ file }: { file: ApiFile }) => {
       </div>
     </div>
   )
-
-
 
   // ── Render ─────────────────────────────────────────────
   return (
@@ -524,14 +477,13 @@ const GridCard = ({ file }: { file: ApiFile }) => {
       )}
 
       {/* ── Grid View ── */}
-     {/* ── Grid View ── */}
-{view === 'grid' && processed.length > 0 && (
-  <div className="columns-2 sm:columns-3 md:columns-4 lg:columns-5 xl:columns-6 gap-4">
-    {processed.map(file => (
-      <GridCard key={file.file_id} file={file} />
-    ))}
-  </div>
-)}
+      {view === 'grid' && processed.length > 0 && (
+        <div className="columns-2 sm:columns-3 md:columns-4 lg:columns-5 xl:columns-6 gap-4">
+          {processed.map(file => (
+            <GridCard key={file.file_id} file={file} />
+          ))}
+        </div>
+      )}
 
       {/* ── List View ── */}
       {view === 'list' && processed.length > 0 && (
