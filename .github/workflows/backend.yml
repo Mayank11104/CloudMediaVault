@@ -1,0 +1,55 @@
+name: Deploy Backend to EC2
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy Backend
+    runs-on: ubuntu-latest
+
+    steps:
+      # ─────────────────────────────────────────────
+      # 1️⃣ Checkout repository
+      # ─────────────────────────────────────────────
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ─────────────────────────────────────────────
+      # 2️⃣ Setup SSH key
+      # ─────────────────────────────────────────────
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      # ─────────────────────────────────────────────
+      # 3️⃣ Deploy on EC2
+      # ─────────────────────────────────────────────
+      - name: Deploy Backend on EC2
+        run: |
+          ssh ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+            set -e
+
+            echo "🚀 Deploying backend..."
+
+            cd ~/CloudMediaVault/backend
+
+            echo "📥 Pulling latest code"
+            git pull origin main
+
+            echo "🛑 Stopping containers"
+            docker compose down
+
+            echo "🔨 Building images"
+            docker compose build
+
+            echo "▶️ Starting containers"
+            docker compose up -d
+
+            echo "✅ Backend deployed successfully"
+          EOF
