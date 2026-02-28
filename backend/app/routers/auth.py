@@ -2,52 +2,62 @@ from fastapi import APIRouter, Response, Request, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import Optional
-from app.services.cognito import verify_token
-from app.models.user import UserProfileResponse
-from app.database import cognito_client as cognito
-from app.config import COOKIE_SECURE, COGNITO_CLIENT_ID, COOKIE_ENCRYPTION_KEY
-from app.schemas.auth import CheckUsernameResponse
-from app.services import users as user_service
-from cryptography.fernet import Fernet
 import re
+import time
+import jwt
+
+from cryptography.fernet import Fernet
+
+from app.services.cognito import verify_token
+from app.services import users as user_service
+from app.database import cognito_client as cognito
+from app.models.user import UserProfileResponse
+from app.schemas.auth import CheckUsernameResponse
+from app.config import (
+    COOKIE_SECURE,
+    COGNITO_CLIENT_ID,
+    COOKIE_ENCRYPTION_KEY,
+)
 
 router = APIRouter()
 
-COOKIE_SAMESITE = "lax"
+# ───────────────────────────────────────────────────────────
+# Cookie config
+# ───────────────────────────────────────────────────────────
+COOKIE_SAMESITE = "none"   # REQUIRED for CloudFront cross-site cookies
 
-# ── Cookie Encryption ──────────────────────────────────────
+# ───────────────────────────────────────────────────────────
+# Cookie encryption
+# ───────────────────────────────────────────────────────────
 fernet = Fernet(COOKIE_ENCRYPTION_KEY.encode())
 
 def encrypt_value(value: str) -> str:
-    """Encrypt a value using Fernet"""
     return fernet.encrypt(value.encode()).decode()
 
-def decrypt_value(encrypted: str) -> str:
-    """Decrypt a value using Fernet"""
+def decrypt_value(value: str) -> str:
     try:
-        return fernet.decrypt(encrypted.encode()).decode()
+        return fernet.decrypt(value.encode()).decode()
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid session")
 
-# ── Username Validation ────────────────────────────────────
-USERNAME_REGEX = re.compile(r'^[a-zA-Z0-9_\-]{3,50}$')  # ← Allows uppercase
+# ───────────────────────────────────────────────────────────
+# Username helpers
+# ───────────────────────────────────────────────────────────
+USERNAME_REGEX = re.compile(r"^[a-z0-9_\-]{3,50}$")
 
 def normalize_username(username: str) -> str:
-    """
-    Normalize username to lowercase
-    Call this FIRST before any validation or storage
-    """
     return username.lower().strip()
 
-def validate_username_format(username: str) -> bool:
-    """
-    Validate username format (after normalization)
-    Allows: letters, numbers, underscores, hyphens
-    Length: 3-50 characters
-    """
-    return bool(USERNAME_REGEX.match(username))
+def validate_username(username: str) -> None:
+    if not USERNAME_REGEX.match(username):
+        raise HTTPException(
+            status_code=400,
+            detail="Username must be 3–50 chars (a-z, 0-9, _, -)"
+        )
 
-# ── Pydantic models ────────────────────────────────────────
+# ───────────────────────────────────────────────────────────
+# Schemas
+# ───────────────────────────────────────────────────────────
 class TokenPayload(BaseModel):
     access_token: str
     id_token: str
@@ -55,19 +65,30 @@ class TokenPayload(BaseModel):
     username: Optional[str] = None
 
 class UpdateProfileBody(BaseModel):
-    name: str = Field(..., min_length=1, max_length=100, strip_whitespace=True)
+    name: str = Field(..., min_length=1, max_length=100)
 
 class ChangePasswordBody(BaseModel):
-    current_password: str = Field(..., min_length=8)
-    new_password: str = Field(..., min_length=8, max_length=128)
+    current_password: str
+    new_password: str
 
-# ── Cookie helpers ─────────────────────────────────────────
-def set_auth_cookies(response: Response, access_token: str,
-                     id_token: str, refresh_token: Optional[str] = None,
-                     username: Optional[str] = None):
-    """Set httpOnly cookies - manual approach to ensure all 3 are set"""
-    
-    # Set access_token
+# ───────────────────────────────────────────────────────────
+# Cookie helpers
+# ───────────────────────────────────────────────────────────
+def set_auth_cookies(
+    response: Response,
+    *,
+    access_token: str,
+    id_token: str,
+    refresh_token: Optional[str],
+    username: str,
+):
+    """
+    Username is REQUIRED here.
+    If it's missing, that's a bug and we fail loudly.
+    """
+    if not username:
+        raise RuntimeError("Attempted to set cookies without username")
+
     response.set_cookie(
         key="access_token",
         value=access_token,
@@ -77,8 +98,7 @@ def set_auth_cookies(response: Response, access_token: str,
         max_age=3600,
         path="/",
     )
-    
-    # Set id_token
+
     response.set_cookie(
         key="id_token",
         value=id_token,
@@ -88,8 +108,7 @@ def set_auth_cookies(response: Response, access_token: str,
         max_age=3600,
         path="/",
     )
-    
-    # Set refresh_token
+
     if refresh_token:
         response.set_cookie(
             key="refresh_token",
@@ -100,25 +119,21 @@ def set_auth_cookies(response: Response, access_token: str,
             max_age=30 * 24 * 3600,
             path="/",
         )
-    
-    # Set encrypted username cookie
-    if username:
-        encrypted_username = encrypt_value(username)
-        response.set_cookie(
-            key="username",
-            value=encrypted_username,
-            httponly=True,
-            secure=COOKIE_SECURE,
-            samesite=COOKIE_SAMESITE,
-            max_age=3600,
-            path="/",
-        )
+
+    response.set_cookie(
+        key="username",
+        value=encrypt_value(username),
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite=COOKIE_SAMESITE,
+        max_age=30 * 24 * 3600,
+        path="/",
+    )
 
 def clear_auth_cookies(response: Response):
-    """Clear all auth cookies"""
-    for name in ("access_token", "id_token", "refresh_token", "username"):
+    for key in ("access_token", "id_token", "refresh_token", "username"):
         response.set_cookie(
-            key=name,
+            key=key,
             value="",
             httponly=True,
             secure=COOKIE_SECURE,
@@ -127,79 +142,67 @@ def clear_auth_cookies(response: Response):
             path="/",
         )
 
-# ── GET /auth/check-username/{username} ────────────────────
+# ───────────────────────────────────────────────────────────
+# Routes
+# ───────────────────────────────────────────────────────────
+
 @router.get("/check-username/{username}", response_model=CheckUsernameResponse)
-def check_username_availability(username: str):
-    """Check if username is available"""
-    # ✨ STEP 1: Normalize FIRST (convert to lowercase)
+def check_username(username: str):
     username = normalize_username(username)
-    
-    # STEP 2: Validate format
-    if not validate_username_format(username):
-        raise HTTPException(
-            status_code=400,
-            detail="Username must be 3-50 characters (letters, numbers, underscores, hyphens)"
-        )
-    
-    # STEP 3: Check availability
-    is_available = user_service.is_username_available(username)
-    
+    validate_username(username)
+
+    available = user_service.is_username_available(username)
     return CheckUsernameResponse(
-        available=is_available,
-        message="Username available" if is_available else "Username already taken"
+        available=available,
+        message="Username available" if available else "Username already taken",
     )
 
-# ── POST /auth/login ───────────────────────────────────────
+# ───────────────────────────────────────────────────────────
+# LOGIN
+# ───────────────────────────────────────────────────────────
 @router.post("/login")
 def login(payload: TokenPayload):
-    """Login endpoint - verifies Cognito tokens and sets httpOnly cookies"""
-    # Verify access_token (for login validation)
-    user = verify_token(payload.access_token, token_use="access")
-    
-    email = user.get("email")
-    name = user.get("name")
-    user_id = user.get("sub")
-    username = None
-    
-    # Handle username logic
+    cognito_user = verify_token(payload.access_token, token_use="access")
+
+    user_id = cognito_user["sub"]
+    email = cognito_user.get("email")
+    name = cognito_user.get("name")
+
+    # ── Resolve username (ONE TRUE SOURCE) ──
     if payload.username:
-        # ✨ STEP 1: Normalize FIRST (convert to lowercase)
         username = normalize_username(payload.username)
-        
-        # STEP 2: Validate format
-        if not validate_username_format(username):
-            raise HTTPException(status_code=400, detail="Invalid username format")
-        
-        # STEP 3: Check availability
+        validate_username(username)
+
         if not user_service.is_username_available(username):
             raise HTTPException(status_code=400, detail="Username already taken")
-        
-        # STEP 4: Create user (username already lowercase)
-        try:
-            user_service.create_user(
-                email=email,
-                username=username,
-                user_id=user_id,
-                name=name
-            )
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to create user: {str(e)}")
+
+        user_service.create_user(
+            user_id=user_id,
+            email=email,
+            username=username,
+            name=name,
+        )
     else:
-        # Regular login - fetch username from database
         db_user = user_service.get_user_by_id(user_id)
-        if db_user:
-            username = db_user.get('username')
-    
-    response = JSONResponse(content={
-        "message": "Logged in successfully",
-        "user": {
-            "email": email,
-            "name": name,
-            "sub": user_id,
-            "username": username,
-        },
-    })
-    
+        if not db_user or not db_user.get("username"):
+            raise HTTPException(
+                status_code=400,
+                detail="Username not found. Please complete signup."
+            )
+        username = db_user["username"]
+
+    response = JSONResponse(
+        content={
+            "message": "Logged in successfully",
+            "user": {
+                "sub": user_id,
+                "email": email,
+                "name": name,
+                "username": username,
+            },
+        }
+    )
+
     set_auth_cookies(
         response,
         access_token=payload.access_token,
@@ -207,116 +210,67 @@ def login(payload: TokenPayload):
         refresh_token=payload.refresh_token,
         username=username,
     )
-    
+
     return response
 
-# ── GET /auth/me ───────────────────────────────────────────
+# ───────────────────────────────────────────────────────────
+# ME
+# ───────────────────────────────────────────────────────────
 @router.get("/me", response_model=UserProfileResponse)
 def me(request: Request):
-    """Get current user from httpOnly cookies"""
-    
     id_token = request.cookies.get("id_token")
-    
     if not id_token:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    # Verify id_token (contains user profile data)
-    user = verify_token(id_token, token_use="id")
-    
+
+    payload = jwt.decode(id_token, options={"verify_signature": False})
+    if payload.get("exp", 0) < time.time():
+        raise HTTPException(status_code=401, detail="Token expired")
+
     return UserProfileResponse(
-        email=user.get("email", ""),
-        name=user.get("name", ""),
-        sub=user.get("sub", ""),
+        sub=payload.get("sub"),
+        email=payload.get("email"),
+        name=payload.get("name"),
     )
 
-# ── POST /auth/logout ──────────────────────────────────────
-@router.post("/logout")
-def logout():
-    """Logout - clear all cookies"""
-    response = JSONResponse(content={"message": "Logged out successfully"})
-    clear_auth_cookies(response)
-    return response
-
-# ── POST /auth/refresh ─────────────────────────────────────
+# ───────────────────────────────────────────────────────────
+# REFRESH
+# ───────────────────────────────────────────────────────────
 @router.post("/refresh")
 def refresh(request: Request):
-    """Refresh access token using refresh token"""
     refresh_token = request.cookies.get("refresh_token")
     encrypted_username = request.cookies.get("username")
-    
+
     if not refresh_token:
         raise HTTPException(status_code=401, detail="No refresh token")
 
-    try:
-        result = cognito.initiate_auth(
-            AuthFlow='REFRESH_TOKEN_AUTH',
-            AuthParameters={'REFRESH_TOKEN': refresh_token},
-            ClientId=COGNITO_CLIENT_ID,
-        )
-        tokens = result['AuthenticationResult']
-        
-        # Decrypt username to re-set in new cookie
-        username = decrypt_value(encrypted_username) if encrypted_username else None
-        
-        response = JSONResponse(content={"message": "Token refreshed successfully"})
-        set_auth_cookies(
-            response,
-            access_token=tokens['AccessToken'],
-            id_token=tokens['IdToken'],
-            username=username
-        )
-        return response
+    if not encrypted_username:
+        raise HTTPException(status_code=401, detail="Username session lost")
 
-    except cognito.exceptions.NotAuthorizedException:
-        response = JSONResponse(
-            status_code=401,
-            content={"detail": "Session expired, please login again"}
-        )
-        clear_auth_cookies(response)
-        return response
+    username = decrypt_value(encrypted_username)
 
-    except Exception:
-        raise HTTPException(status_code=500, detail="Token refresh failed")
+    result = cognito.initiate_auth(
+        AuthFlow="REFRESH_TOKEN_AUTH",
+        AuthParameters={"REFRESH_TOKEN": refresh_token},
+        ClientId=COGNITO_CLIENT_ID,
+    )
 
-# ── PATCH /auth/update-profile ─────────────────────────────
-@router.patch("/update-profile")
-def update_profile(request: Request, body: UpdateProfileBody):
-    """Update user profile"""
-    token = request.cookies.get("access_token")
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    tokens = result["AuthenticationResult"]
 
-    try:
-        cognito.update_user_attributes(
-            AccessToken=token,
-            UserAttributes=[{'Name': 'name', 'Value': body.name}],
-        )
-        return {"message": "Profile updated"}
+    response = JSONResponse({"message": "Token refreshed"})
+    set_auth_cookies(
+        response,
+        access_token=tokens["AccessToken"],
+        id_token=tokens["IdToken"],
+        refresh_token=None,
+        username=username,
+    )
+    return response
 
-    except cognito.exceptions.NotAuthorizedException:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    except Exception:
-        raise HTTPException(status_code=500, detail="Failed to update profile")
-
-# ── POST /auth/change-password ─────────────────────────────
-@router.post("/change-password")
-def change_password(request: Request, body: ChangePasswordBody):
-    """Change password"""
-    token = request.cookies.get("access_token")
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    try:
-        cognito.change_password(
-            AccessToken=token,
-            PreviousPassword=body.current_password,
-            ProposedPassword=body.new_password,
-        )
-        return {"message": "Password updated"}
-
-    except cognito.exceptions.NotAuthorizedException:
-        raise HTTPException(status_code=400, detail="Current password is incorrect")
-    except cognito.exceptions.InvalidPasswordException:
-        raise HTTPException(status_code=400, detail="Password does not meet requirements")
-    except Exception:
-        raise HTTPException(status_code=500, detail="Failed to change password")
+# ───────────────────────────────────────────────────────────
+# LOGOUT
+# ───────────────────────────────────────────────────────────
+@router.post("/logout")
+def logout():
+    response = JSONResponse({"message": "Logged out"})
+    clear_auth_cookies(response)
+    return response

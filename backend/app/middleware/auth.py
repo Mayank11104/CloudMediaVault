@@ -1,41 +1,54 @@
 # app/middleware/auth.py
 import jwt
 import time
-from fastapi import Cookie, HTTPException
+from fastapi import Cookie, HTTPException, Request
+
+from app.routers.auth import decrypt_value  # 🔑 decrypt username cookie
+
 
 async def get_current_user(
+    request: Request,
     id_token: str = Cookie(None),
+    username: str = Cookie(None),
 ):
-    """Extract user from httpOnly ID token"""
-    
+    """Extract user from httpOnly cookies (Cognito + app session)"""
+
     if not id_token:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    
+
     try:
-        # Decode without signature verification
+        # Decode Cognito ID token (no signature verify, CloudFront trusted)
         payload = jwt.decode(
             id_token,
             options={"verify_signature": False}
         )
-        
-        # Check expiration
+
+        # Exp check
         if payload.get("exp", 0) < time.time():
             raise HTTPException(status_code=401, detail="Token expired")
-        
-        # Extract claims
+
         user_id = payload.get("sub")
         email = payload.get("email")
-        name = payload.get("name")
-        
+        name = payload.get("name") or "Unknown"
+
         if not user_id or not email:
             raise HTTPException(status_code=401, detail="Invalid token")
-        
+
+        # 🔐 Decrypt username (required for DynamoDB GSI)
+        decrypted_username = None
+        if username:
+            try:
+                decrypted_username = decrypt_value(username)
+            except Exception:
+                raise HTTPException(status_code=401, detail="Invalid username session")
+
         return {
-            "sub": user_id,      # ✅ Use "sub" instead of "user_id"
+            "sub": user_id,
             "email": email,
-            "name": name or "Unknown",
+            "name": name,
+            "username": decrypted_username,  # ✅ THIS IS WHAT UPLOAD NEEDS
         }
-        
+
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError as e:
