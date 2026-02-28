@@ -149,25 +149,51 @@ export default function Login() {
   const handleSignIn = async () => {
     if (!email || !password) return setError('Please fill all fields')
     setLoading(true); clearError()
+    
+    console.log('🔐 [SIGNIN] Starting sign in process...')
+    console.log('🔐 [SIGNIN] Email:', email)
+    
     try {
+      console.log('🔐 [SIGNIN] Step 1: Authenticating with Cognito...')
       const tokens = await signIn(email, password)
+      console.log('✅ [SIGNIN] Cognito authentication successful')
+      console.log('✅ [SIGNIN] Tokens received:', { email: tokens.email, name: tokens.name })
       
       // Backend will fetch username from DynamoDB
-      await loginToBackend(tokens, '')
+      console.log('🔐 [SIGNIN] Step 2: Logging in to backend (username will be fetched from DB)...')
+      const backendResponse = await loginToBackend(tokens, '')
+      console.log('✅ [SIGNIN] Backend login successful')
+      console.log('✅ [SIGNIN] Username from backend:', backendResponse.username)
       
+      if (!backendResponse.username) {
+        console.error('❌ [SIGNIN] WARNING: No username returned from backend!')
+        setError('Login successful but username not found. Please contact support.')
+        return
+      }
+      
+      console.log('🔐 [SIGNIN] Step 3: Setting auth state...')
       setTokens({ 
         email: tokens.email, 
         name: tokens.name,
-        username: ''  // Will be set by backend response
+        username: backendResponse.username
       })
       
       setPassword('')
       setEmail('')
       
+      console.log('✅ [SIGNIN] Sign in complete, navigating to library...')
       navigate('/library', { replace: true })
     } catch (e: any) {
+      console.error('❌ [SIGNIN] Sign in failed:', e)
+      console.error('❌ [SIGNIN] Error message:', e.message)
+      console.error('❌ [SIGNIN] Error stack:', e.stack)
+      
       if (e.message?.includes('429') || e.message?.includes('Too many')) {
         setError('Too many attempts. Please wait and try again.')
+      } else if (e.message?.includes('User profile not found')) {
+        setError('Account not found in database. Please sign up again or contact support.')
+      } else if (e.message?.includes('Username not set')) {
+        setError('Your account is missing a username. Please contact support to complete setup.')
       } else {
         setError(e.message ?? 'Sign in failed')
       }
@@ -210,18 +236,32 @@ export default function Login() {
     if (!code) return setError('Enter the verification code')
     if (code.length !== 6) return setError('Code must be 6 digits')
     setLoading(true); clearError()
+    
+    console.log('🔐 [VERIFY] Starting verification process...')
+    console.log('🔐 [VERIFY] Email:', email)
+    console.log('🔐 [VERIFY] Username (base):', username)
+    
     try {
+      console.log('🔐 [VERIFY] Step 1: Confirming signup with code...')
       await confirmSignUp(email, code)
+      console.log('✅ [VERIFY] Signup confirmed')
+      
+      console.log('🔐 [VERIFY] Step 2: Signing in with Cognito...')
       const tokens = await signIn(email, password)
+      console.log('✅ [VERIFY] Cognito sign in successful')
       
       // ✨ Send FULL username with suffix to backend
       const fullUsername = `${username}${USERNAME_SUFFIX}`
-      await loginToBackend(tokens, fullUsername)
+      console.log('🔐 [VERIFY] Step 3: Logging in to backend with username:', fullUsername)
+      const backendResponse = await loginToBackend(tokens, fullUsername)
+      console.log('✅ [VERIFY] Backend login successful')
+      console.log('✅ [VERIFY] Username confirmed:', backendResponse.username)
       
+      console.log('🔐 [VERIFY] Step 4: Setting auth state...')
       setTokens({ 
         email: tokens.email, 
         name: tokens.name,
-        username: fullUsername  // ← Store full username with suffix
+        username: backendResponse.username || fullUsername
       })
       
       setPassword('')
@@ -229,8 +269,11 @@ export default function Login() {
       setCode('')
       setUsername('')
       
+      console.log('✅ [VERIFY] Verification complete, navigating to library...')
       navigate('/library', { replace: true })
     } catch (e: any) {
+      console.error('❌ [VERIFY] Verification failed:', e)
+      console.error('❌ [VERIFY] Error message:', e.message)
       setError(e.message ?? 'Verification failed')
     } finally {
       setLoading(false)

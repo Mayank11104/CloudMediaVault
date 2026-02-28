@@ -270,19 +270,20 @@ export default function Upload() {
 
   // ── Real upload to backend ─────────────────────────────
   const uploadToBackend = async (item: QueueItem) => {
+    console.log(`📤 [UPLOAD QUEUE] Starting upload for: ${item.file.name}`)
+    
     // Set uploading
     setQueue(prev =>
       prev.map(q => q.id === item.id ? { ...q, status: 'uploading' } : q)
     )
 
-
-
     try {
       // ✅ Pass abort signal to upload
+      console.log(`📤 [UPLOAD QUEUE] Calling uploadFile for: ${item.file.name}`)
       await uploadFile(item.file, item.width, item.height, item.abortController?.signal)
 
-
-
+      console.log(`✅ [UPLOAD QUEUE] Upload successful: ${item.file.name}`)
+      
       // Set done (only if not cancelled)
       setQueue(prev =>
         prev.map(q =>
@@ -292,8 +293,13 @@ export default function Upload() {
         )
       )
     } catch (e: any) {
+      console.error(`❌ [UPLOAD QUEUE] Upload failed for ${item.file.name}:`, e)
+      console.error(`❌ [UPLOAD QUEUE] Error name: ${e.name}`)
+      console.error(`❌ [UPLOAD QUEUE] Error message: ${e.message}`)
+      
       // Check if cancelled
       if (e.name === 'AbortError' || e.message?.includes('cancel')) {
+        console.log(`⊘ [UPLOAD QUEUE] Upload cancelled: ${item.file.name}`)
         setQueue(prev =>
           prev.map(q =>
             q.id === item.id
@@ -303,6 +309,7 @@ export default function Upload() {
         )
       } else {
         // Set error
+        console.error(`❌ [UPLOAD QUEUE] Setting error state for: ${item.file.name}`)
         setQueue(prev =>
           prev.map(q =>
             q.id === item.id

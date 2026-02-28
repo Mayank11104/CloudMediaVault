@@ -123,26 +123,41 @@ export const confirmNewPassword = (
 export const loginToBackend = async (
   tokens: AuthTokens,
   username: string  // ← NEW PARAMETER
-): Promise<void> => {
-  console.log('🔑 Logging in to backend...')
+): Promise<{ username: string }> => {
+  console.log('🔑 [LOGIN] Starting backend login...')
+  console.log('🔑 [LOGIN] Username provided:', username || '(empty - will fetch from DB)')
+  console.log('🔑 [LOGIN] Email:', tokens.email)
+
+  const requestBody = {
+    access_token: tokens.accessToken,
+    id_token: tokens.idToken,
+    refresh_token: tokens.refreshToken,
+    username: username,
+  }
+  
+  console.log('🔑 [LOGIN] Request body:', { ...requestBody, access_token: '[REDACTED]', id_token: '[REDACTED]', refresh_token: '[REDACTED]' })
 
   const response = await fetch('/api/auth/login', {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      access_token: tokens.accessToken,
-      id_token: tokens.idToken,
-      refresh_token: tokens.refreshToken,
-      username: username,  // ← SEND USERNAME TO BACKEND
-    }),
+    body: JSON.stringify(requestBody),
   })
+
+  console.log('🔑 [LOGIN] Response status:', response.status)
 
   if (!response.ok) {
     const error = await response.json()
+    console.error('❌ [LOGIN] Backend login failed:', error)
+    console.error('❌ [LOGIN] Error detail:', error.detail)
     throw new Error(error.detail ?? 'Backend login failed')
   }
 
-  console.log('✅ Backend login successful')
-  console.log('🍪 Cookies after login:', document.cookie)
+  const data = await response.json()
+  console.log('✅ [LOGIN] Backend login successful')
+  console.log('✅ [LOGIN] Response data:', data)
+  console.log('✅ [LOGIN] Username from backend:', data.user?.username)
+  console.log('🍪 [LOGIN] Cookies after login:', document.cookie)
+  
+  return { username: data.user?.username || username }
 }

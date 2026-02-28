@@ -17,12 +17,13 @@ def _now() -> str:
 def _deserialize(item: Dict[str, Any]) -> Dict[str, Any]:
     """
     Convert DynamoDB Decimal → int/float for JSON serialization.
+    Also decrypt file_name_enc → file_name if present.
     
     Args:
         item: DynamoDB item with potential Decimal values
         
     Returns:
-        dict: Item with Decimals converted to int/float
+        dict: Item with Decimals converted to int/float and filename decrypted
     """
     result = {}
     for k, v in item.items():
@@ -30,6 +31,17 @@ def _deserialize(item: Dict[str, Any]) -> Dict[str, Any]:
             result[k] = int(v) if v == v.to_integral_value() else float(v)
         else:
             result[k] = v
+    
+    # Decrypt filename if encrypted
+    if "file_name_enc" in result and "file_name" not in result:
+        try:
+            result["file_name"] = base64.urlsafe_b64decode(
+                result["file_name_enc"].encode()
+            ).decode()
+        except Exception:
+            # If decryption fails, use a fallback
+            result["file_name"] = "unknown"
+    
     return result
 
 
