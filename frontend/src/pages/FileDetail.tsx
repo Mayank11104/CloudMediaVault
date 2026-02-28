@@ -18,6 +18,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { api } from '@/lib/api'
 import type { ReactNode } from 'react'
+
 // ── Types ──────────────────────────────────────────────────
 type FileType = 'image' | 'video' | 'document'
 
@@ -28,7 +29,7 @@ interface FileData {
   mime_type:     string
   file_size:     number
   created_at:    string
-  presigned_url: string
+  presigned_url: string  // kept in type but no longer used for preview/download
 }
 
 interface Album {
@@ -49,8 +50,11 @@ const formatDate = (iso: string) =>
   })
 
 // ── Preview Component ──────────────────────────────────────
+// 🔴 OLD: used file.presigned_url → encrypted bytes
+// ✅ NEW: uses /preview endpoint → backend decrypts before streaming
 function FilePreview({ file }: { file: FileData }) {
   const [imgError, setImgError] = useState(false)
+  const previewSrc = `/api/files/${file.file_id}/preview`
 
   if (file.file_type === 'image') {
     return imgError ? (
@@ -60,7 +64,7 @@ function FilePreview({ file }: { file: FileData }) {
       </div>
     ) : (
       <img
-        src={file.presigned_url}
+        src={previewSrc}
         alt={file.file_name}
         onError={() => setImgError(true)}
         className="w-full h-full object-contain rounded-xl"
@@ -71,7 +75,7 @@ function FilePreview({ file }: { file: FileData }) {
   if (file.file_type === 'video') {
     return (
       <video
-        src={file.presigned_url}
+        src={previewSrc}
         controls
         className="w-full h-full rounded-xl object-contain bg-black"
       >
@@ -82,9 +86,14 @@ function FilePreview({ file }: { file: FileData }) {
 
   if (file.file_type === 'document') {
     const isPDF      = file.mime_type === 'application/pdf'
+    // 🔴 OLD: used presigned_url directly (encrypted) + google docs viewer
+    // ✅ NEW: /preview streams decrypted bytes — works for PDF inline
+    //         non-PDF docs still use Google Docs viewer via /preview URL
     const previewUrl = isPDF
-      ? file.presigned_url
-      : `https://docs.google.com/gview?url=${encodeURIComponent(file.presigned_url)}&embedded=true`
+      ? previewSrc
+      : `https://docs.google.com/gview?url=${encodeURIComponent(
+          window.location.origin + previewSrc
+        )}&embedded=true`
 
     return (
       <iframe
@@ -100,9 +109,7 @@ function FilePreview({ file }: { file: FileData }) {
 
 // ── Info Card ──────────────────────────────────────────────
 function InfoCard({
-  icon,
-  label,
-  value,
+  icon, label, value,
 }: {
   icon: ReactNode
   label: string
@@ -186,7 +193,6 @@ function AlbumModal({
   const [saving,   setSaving]   = useState(false)
   const [error,    setError]    = useState('')
 
-  // ── Fetch real albums ──────────────────────────────────
   useEffect(() => {
     const fetchAlbums = async () => {
       try {
@@ -201,7 +207,6 @@ function AlbumModal({
     fetchAlbums()
   }, [])
 
-  // ── Move file to selected album ────────────────────────
   const handleMove = async () => {
     if (!selected) return
     setSaving(true)
@@ -237,7 +242,6 @@ function AlbumModal({
           </button>
         </div>
 
-        {/* Loading state */}
         {loading && (
           <div className="flex items-center justify-center py-8">
             <div className="w-6 h-6 border-2 border-beige border-t-transparent
@@ -245,7 +249,6 @@ function AlbumModal({
           </div>
         )}
 
-        {/* Albums list */}
         {!loading && albums.length > 0 && (
           <div className="space-y-2 mb-5 max-h-64 overflow-y-auto pr-1">
             {albums.map(album => (
@@ -269,7 +272,6 @@ function AlbumModal({
           </div>
         )}
 
-        {/* Empty state */}
         {!loading && albums.length === 0 && (
           <p className="text-muted text-sm text-center py-8">
             No albums yet. Create one from the Albums page.
@@ -348,21 +350,20 @@ function DeleteModal({
 
 // ── Main Component ─────────────────────────────────────────
 export default function FileDetail() {
-  const navigate         = useNavigate()
-  const { id }           = useParams<{ id: string }>()   // /library/:id
+  const navigate = useNavigate()
+  const { id }   = useParams<{ id: string }>()
 
-  const [file,        setFile]        = useState<FileData | null>(null)
-  const [loading,     setLoading]     = useState(true)
-  const [error,       setError]       = useState('')
-  const [showRename,  setShowRename]  = useState(false)
-  const [showAlbum,   setShowAlbum]   = useState(false)
-  const [showDelete,  setShowDelete]  = useState(false)
-  const [previewOpen, setPreviewOpen] = useState(false)
+  const [file,         setFile]         = useState<FileData | null>(null)
+  const [loading,      setLoading]      = useState(true)
+  const [error,        setError]        = useState('')
+  const [showRename,   setShowRename]   = useState(false)
+  const [showAlbum,    setShowAlbum]    = useState(false)
+  const [showDelete,   setShowDelete]   = useState(false)
+  const [previewOpen,  setPreviewOpen]  = useState(false)
   const [renameSaving, setRenameSaving] = useState(false)
   const [renameError,  setRenameError]  = useState('')
   const [deleteSaving, setDeleteSaving] = useState(false)
 
-  // ── Fetch file details ─────────────────────────────────
   const fetchFile = useCallback(async () => {
     if (!id) return
     setLoading(true)
@@ -379,7 +380,6 @@ export default function FileDetail() {
 
   useEffect(() => { fetchFile() }, [fetchFile])
 
-  // ── Rename file ────────────────────────────────────────
   const handleRename = async (newName: string) => {
     if (!file) return
     setRenameSaving(true)
@@ -398,7 +398,6 @@ export default function FileDetail() {
     }
   }
 
-  // ── Soft delete → Recycle Bin ──────────────────────────
   const handleDelete = async () => {
     if (!file) return
     setDeleteSaving(true)
@@ -411,7 +410,6 @@ export default function FileDetail() {
     }
   }
 
-  // ── Loading / Error states ─────────────────────────────
   if (loading) return (
     <div className="min-h-screen bg-main-bg flex items-center justify-center">
       <div className="w-8 h-8 border-2 border-beige border-t-transparent
@@ -430,7 +428,7 @@ export default function FileDetail() {
     </div>
   )
 
- const TYPE_ICON: Record<FileType, ReactNode> = {
+  const TYPE_ICON: Record<FileType, ReactNode> = {
     image:    <PhotoIcon        className="w-6 h-6 text-beige-dim" />,
     video:    <FilmIcon         className="w-6 h-6 text-beige-dim" />,
     document: <DocumentTextIcon className="w-6 h-6 text-beige-dim" />,
@@ -439,7 +437,6 @@ export default function FileDetail() {
   return (
     <div className="min-h-screen bg-main-bg px-6 py-8">
 
-      {/* ── Back button ── */}
       <button
         onClick={() => navigate('/library')}
         className="flex items-center gap-2 text-muted hover:text-beige
@@ -449,7 +446,6 @@ export default function FileDetail() {
         Back to Library
       </button>
 
-      {/* ── File name + actions ── */}
       <div className="flex items-start justify-between gap-4 mb-6">
         <div className="flex items-center gap-3 min-w-0">
           {TYPE_ICON[file.file_type]}
@@ -473,14 +469,18 @@ export default function FileDetail() {
             <RectangleGroupIcon className="w-4 h-4" />
             Album
           </button>
+
+          {/* 🔴 OLD: <a href={file.presigned_url} download> → encrypted bytes */}
+          {/* ✅ NEW: /download endpoint → backend decrypts before sending */}
           <a
-            href={file.presigned_url}
+            href={`/api/files/${file.file_id}/download`}
             download={file.file_name}
             className="btn-primary flex items-center gap-2 text-sm"
           >
             <ArrowDownTrayIcon className="w-4 h-4" />
             Download
           </a>
+
           <button
             onClick={() => setShowDelete(true)}
             className="btn-danger flex items-center gap-2 text-sm"
@@ -491,7 +491,6 @@ export default function FileDetail() {
         </div>
       </div>
 
-      {/* ── Large Preview ── */}
       <div
         className="w-full bg-surface border border-border rounded-2xl overflow-hidden
                    mb-6 cursor-zoom-in"
@@ -501,7 +500,6 @@ export default function FileDetail() {
         <FilePreview file={file} />
       </div>
 
-      {/* ── Info Cards ── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <InfoCard
           icon={<TagIcon            className="w-4 h-4 text-muted" />}
@@ -530,7 +528,6 @@ export default function FileDetail() {
         />
       </div>
 
-      {/* ── Fullscreen Preview Overlay ── */}
       {previewOpen && (
         <div
           className="fixed inset-0 bg-black/90 backdrop-blur-sm z-50
@@ -554,7 +551,6 @@ export default function FileDetail() {
         </div>
       )}
 
-      {/* ── Modals ── */}
       {showRename && (
         <RenameModal
           current={file.file_name}
