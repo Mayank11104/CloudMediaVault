@@ -1,18 +1,31 @@
 # app/middleware/auth.py
 import jwt
 import time
+from typing import Dict, Any
 from fastapi import Cookie, HTTPException, Request
 
-from app.routers.auth import decrypt_value  # 🔑 decrypt username cookie
+from app.routers.auth import decrypt_value
 
 
 async def get_current_user(
     request: Request,
     id_token: str = Cookie(None),
     username: str = Cookie(None),
-):
-    """Extract user from httpOnly cookies (Cognito + app session)"""
-
+) -> Dict[str, Any]:
+    """
+    Extract user from httpOnly cookies (Cognito + app session).
+    
+    Args:
+        request: FastAPI request object
+        id_token: Cognito ID token from cookie
+        username: Encrypted username from cookie
+        
+    Returns:
+        dict: User information including sub, email, name, username
+        
+    Raises:
+        HTTPException: If authentication fails
+    """
     if not id_token:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
@@ -34,7 +47,7 @@ async def get_current_user(
         if not user_id or not email:
             raise HTTPException(status_code=401, detail="Invalid token")
 
-        # 🔐 Decrypt username (required for DynamoDB GSI)
+        # Decrypt username (required for DynamoDB GSI)
         decrypted_username = None
         if username:
             try:
@@ -46,7 +59,7 @@ async def get_current_user(
             "sub": user_id,
             "email": email,
             "name": name,
-            "username": decrypted_username,  # ✅ THIS IS WHAT UPLOAD NEEDS
+            "username": decrypted_username,
         }
 
     except jwt.ExpiredSignatureError:

@@ -1,5 +1,6 @@
 import os
 import urllib.parse
+from typing import Optional
 from botocore.exceptions import ClientError
 from fastapi import HTTPException
 from app.database import s3_client as _s3
@@ -13,6 +14,21 @@ def upload_file(
     content_type: str,
     user_id: str,
 ) -> str:
+    """
+    Upload and encrypt a file to S3.
+    
+    Args:
+        file_bytes: Raw file content
+        s3_key: S3 object key
+        content_type: MIME type
+        user_id: User's Cognito sub for encryption
+        
+    Returns:
+        str: SHA256 hash of the original file
+        
+    Raises:
+        HTTPException: If S3 upload fails
+    """
     from .encryption import FileEncryption
 
     # Encrypt file + compute hash
@@ -38,15 +54,29 @@ def upload_file(
             detail=f"S3 upload failed: {e.response['Error']['Message']}",
         )
 
-    return file_hash  # ✅ RETURN REAL HASH
+    return file_hash
 
 
 # ── Generate Presigned URL ─────────────────────────────────
 def get_presigned_url(
     s3_key: str,
     expires_in: int = 900,
-    filename: str = None,
+    filename: Optional[str] = None,
 ) -> str:
+    """
+    Generate a presigned URL for downloading a file.
+    
+    Args:
+        s3_key: S3 object key
+        expires_in: URL expiration time in seconds (default 15 minutes)
+        filename: Optional filename for Content-Disposition header
+        
+    Returns:
+        str: Presigned URL
+        
+    Raises:
+        HTTPException: If URL generation fails
+    """
     try:
         params = {"Bucket": BUCKET, "Key": s3_key}
 
@@ -70,6 +100,15 @@ def get_presigned_url(
 
 # ── Public URL (CloudFront preferred) ──────────────────────
 def get_public_url(s3_key: str) -> str:
+    """
+    Get public URL for a file (CloudFront if configured, otherwise S3).
+    
+    Args:
+        s3_key: S3 object key
+        
+    Returns:
+        str: Public URL
+    """
     from app.config import CLOUDFRONT_DOMAIN
 
     if CLOUDFRONT_DOMAIN:
@@ -80,6 +119,15 @@ def get_public_url(s3_key: str) -> str:
 
 # ── Delete File ────────────────────────────────────────────
 def delete_file(s3_key: str) -> None:
+    """
+    Delete a file from S3.
+    
+    Args:
+        s3_key: S3 object key
+        
+    Raises:
+        HTTPException: If deletion fails
+    """
     try:
         _s3.delete_object(Bucket=BUCKET, Key=s3_key)
     except ClientError:
@@ -91,12 +139,35 @@ def delete_file(s3_key: str) -> None:
 
 # ── Make S3 Key (USERNAME-BASED) ───────────────────────────
 def make_s3_key(username: str, file_id: str, file_name: str) -> str:
+    """
+    Generate S3 key for a file.
+    
+    Args:
+        username: User's username
+        file_id: File's unique identifier
+        file_name: Original filename
+        
+    Returns:
+        str: S3 object key in format: users/{username}/{file_id}/{filename}
+    """
     safe_name = os.path.basename(file_name).replace(" ", "_")
     return f"users/{username}/{file_id}/{safe_name}"
 
 
 # ── Get File Size ──────────────────────────────────────────
 def get_file_size(s3_key: str) -> int:
+    """
+    Get the size of a file in S3.
+    
+    Args:
+        s3_key: S3 object key
+        
+    Returns:
+        int: File size in bytes
+        
+    Raises:
+        HTTPException: If file not found or retrieval fails
+    """
     try:
         response = _s3.head_object(Bucket=BUCKET, Key=s3_key)
         return response["ContentLength"]

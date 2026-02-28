@@ -26,6 +26,15 @@ _jwks_expiry = 0.0
 JWKS_TTL = 3600  # re-fetch keys every 1 hour
 
 def get_jwks() -> dict:
+    """
+    Fetch and cache Cognito JWKS (JSON Web Key Set).
+    
+    Returns:
+        dict: JWKS containing public keys for token verification
+        
+    Raises:
+        HTTPException: If JWKS cannot be fetched and no cache exists
+    """
     global _jwks, _jwks_expiry
     if _jwks is None or time.time() > _jwks_expiry:
         try:
@@ -43,7 +52,7 @@ def get_jwks() -> dict:
             )
     return _jwks
 
-def _force_jwks_refresh():
+def _force_jwks_refresh() -> None:
     """Force JWKS cache to expire on next get_jwks() call."""
     global _jwks_expiry
     _jwks_expiry = 0.0
@@ -56,37 +65,32 @@ def verify_token(token: str, token_use: str = None) -> dict:
     Args:
         token: JWT token string
         token_use: Expected token_use value ('access' or 'id'). If None, accepts both.
+    
+    Returns:
+        dict: Decoded JWT payload
+        
+    Raises:
+        HTTPException: If token is invalid, expired, or verification fails
     """
-    
-    print("=" * 60)
-    print("VERIFYING TOKEN:")
-    print(f"  Token (first 50): {token[:50]}...")
-    print(f"  Expected token_use: {token_use or 'any'}")
-    
     try:
         jwks = get_jwks()
         headers = jwt.get_unverified_headers(token)
         kid = headers.get("kid")
         
-        print(f"  Token kid: {kid}")
-        
         if not kid:
-            print("  ❌ ERROR: No kid in token header")
             raise HTTPException(status_code=401, detail="Invalid token")
 
         # Find matching public key by kid
         key = next((k for k in jwks["keys"] if k["kid"] == kid), None)
         if not key:
-            print("  ⚠️  kid not found, forcing JWKS refresh...")
             # kid not found — keys may have rotated, force refresh once
             _force_jwks_refresh()
             jwks = get_jwks()
             key = next((k for k in jwks["keys"] if k["kid"] == kid), None)
             if not key:
-                print("  ❌ ERROR: kid still not found after refresh")
                 raise HTTPException(status_code=401, detail="Invalid token")
 
-        # ✅ Decode and verify
+        # Decode and verify
         payload = jwt.decode(
             token,
             key,
@@ -95,32 +99,20 @@ def verify_token(token: str, token_use: str = None) -> dict:
             issuer=ISSUER,
         )
         
-        actual_token_use = payload.get("token_use")
-        print(f"  Actual token_use: {actual_token_use}")
-        
-        # ✅ Validate token_use if specified
-        if token_use and actual_token_use != token_use:
-            print(f"  ❌ ERROR: Expected token_use '{token_use}', got '{actual_token_use}'")
-            raise HTTPException(
-                status_code=401, 
-                detail=f"Invalid token type. Expected {token_use}, got {actual_token_use}"
-            )
-        
-        print(f"  ✅ Token verified successfully")
-        print(f"  User sub: {payload.get('sub')}")
-        print(f"  Email: {payload.get('email')}")
-        print("=" * 60)
+        # Validate token_use if specified
+        if token_use:
+            actual_token_use = payload.get("token_use")
+            if actual_token_use != token_use:
+                raise HTTPException(
+                    status_code=401, 
+                    detail=f"Invalid token type. Expected {token_use}, got {actual_token_use}"
+                )
 
         return payload
 
     except HTTPException:
-        print("=" * 60)
         raise
-    except JWTError as e:
-        print(f"  ❌ JWT ERROR: {str(e)}")
-        print("=" * 60)
+    except JWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
-    except Exception as e:
-        print(f"  ❌ UNEXPECTED ERROR: {str(e)}")
-        print("=" * 60)
+    except Exception:
         raise HTTPException(status_code=401, detail="Invalid or expired token")

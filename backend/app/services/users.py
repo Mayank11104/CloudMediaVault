@@ -1,5 +1,6 @@
 # app/services/users.py
 from decimal import Decimal
+from typing import Dict, Any, Optional
 from boto3.dynamodb.conditions import Key
 from fastapi import HTTPException
 from botocore.exceptions import ClientError
@@ -7,11 +8,24 @@ from app.database import get_table
 import time
 
 def _now() -> int:
-    """Return current timestamp as integer"""
+    """
+    Return current timestamp as integer.
+    
+    Returns:
+        int: Current Unix timestamp
+    """
     return int(time.time())
 
-def _deserialize(item: dict) -> dict:
-    """Convert DynamoDB Decimal → int/float for JSON serialization."""
+def _deserialize(item: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Convert DynamoDB Decimal → int/float for JSON serialization.
+    
+    Args:
+        item: DynamoDB item with potential Decimal values
+        
+    Returns:
+        dict: Item with Decimals converted to int/float
+    """
     result = {}
     for k, v in item.items():
         if isinstance(v, Decimal):
@@ -21,15 +35,27 @@ def _deserialize(item: dict) -> dict:
     return result
 
 # ── Create User ────────────────────────────────────────────
-def create_user(email: str, username: str, user_id: str, name: str) -> dict:
+def create_user(email: str, username: str, user_id: str, name: str) -> Dict[str, Any]:
     """
-    Create user profile in same table as files
+    Create user profile in DynamoDB.
     Single-table design: PK=user_id, SK=USER#PROFILE
+    
+    Args:
+        email: User's email address
+        username: Unique username
+        user_id: Cognito sub (user ID)
+        name: User's display name
+        
+    Returns:
+        dict: Created user profile
+        
+    Raises:
+        HTTPException: If user already exists or database error
     """
     table = get_table()
     item = {
-        'user_id': user_id,         # PK (Cognito sub)
-        'file_id': 'USER#PROFILE',  # SK (distinguishes from files)
+        'user_id': user_id,
+        'file_id': 'USER#PROFILE',
         'email': email,
         'username': username,
         'name': name,
@@ -49,9 +75,15 @@ def create_user(email: str, username: str, user_id: str, name: str) -> dict:
         raise HTTPException(status_code=500, detail="Failed to create user")
 
 # ── Get User by ID ─────────────────────────────────────────
-def get_user_by_id(user_id: str) -> dict | None:
+def get_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
     """
-    Get user profile by user_id (Cognito sub)
+    Get user profile by user_id (Cognito sub).
+    
+    Args:
+        user_id: Cognito sub (user ID)
+        
+    Returns:
+        dict or None: User profile if found, None otherwise
     """
     table = get_table()
     
@@ -68,16 +100,21 @@ def get_user_by_id(user_id: str) -> dict | None:
         return None
 
 # ── Get User by Username (GSI) ─────────────────────────────
-def get_user_by_username(username: str) -> dict | None:
+def get_user_by_username(username: str) -> Optional[Dict[str, Any]]:
     """
-    Query user by username using GSI
-    Returns user dict if found, None otherwise
+    Query user by username using GSI.
+    
+    Args:
+        username: Username to search for
+        
+    Returns:
+        dict or None: User profile if found, None otherwise
     """
     table = get_table()
     
     try:
         response = table.query(
-            IndexName='username-index',  # GSI name (needs to be created)
+            IndexName='username-index',
             KeyConditionExpression=Key('username').eq(username)
         )
         
@@ -91,7 +128,13 @@ def get_user_by_username(username: str) -> dict | None:
 # ── Check Username Availability ────────────────────────────
 def is_username_available(username: str) -> bool:
     """
-    Check if username is available (not taken)
+    Check if username is available (not taken).
+    
+    Args:
+        username: Username to check
+        
+    Returns:
+        bool: True if available, False if taken
     """
     user = get_user_by_username(username)
     return user is None

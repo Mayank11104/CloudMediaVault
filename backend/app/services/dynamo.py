@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import List, Dict, Any, Optional
 from boto3.dynamodb.conditions import Key, Attr
 from fastapi import HTTPException
 from botocore.exceptions import ClientError
@@ -13,8 +14,16 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _deserialize(item: dict) -> dict:
-    """Convert DynamoDB Decimal → int/float for JSON serialization."""
+def _deserialize(item: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Convert DynamoDB Decimal → int/float for JSON serialization.
+    
+    Args:
+        item: DynamoDB item with potential Decimal values
+        
+    Returns:
+        dict: Item with Decimals converted to int/float
+    """
     result = {}
     for k, v in item.items():
         if isinstance(v, Decimal):
@@ -24,8 +33,17 @@ def _deserialize(item: dict) -> dict:
     return result
 
 
-def _paginated_query(table, **kwargs) -> list:
-    """Paginate through all DynamoDB results (>1MB safe)."""
+def _paginated_query(table, **kwargs) -> List[Dict[str, Any]]:
+    """
+    Paginate through all DynamoDB results (>1MB safe).
+    
+    Args:
+        table: DynamoDB table resource
+        **kwargs: Query parameters
+        
+    Returns:
+        list: All items from paginated query results
+    """
     items = []
     while True:
         response = table.query(**kwargs)
@@ -43,18 +61,41 @@ def _paginated_query(table, **kwargs) -> list:
 def create_file(
     *,
     user_id: str,
-    file_id: str,            # ✅ MUST come from router
-    username: str,           # ✅ REQUIRED (GSI)
+    file_id: str,
+    username: str,
     file_name: str,
     s3_key: str,
     file_type: str,
     file_size: int,
-    album_id: str = None,
-    width: int = None,
-    height: int = None,
-    s3_url: str = None,
-    file_hash: str = None,
-) -> dict:
+    album_id: Optional[str] = None,
+    width: Optional[int] = None,
+    height: Optional[int] = None,
+    s3_url: Optional[str] = None,
+    file_hash: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Create a new file record in DynamoDB.
+    
+    Args:
+        user_id: User's Cognito sub
+        file_id: Unique file identifier (UUID)
+        username: Username for GSI
+        file_name: Original filename
+        s3_key: S3 object key
+        file_type: File type (image/video/document)
+        file_size: File size in bytes
+        album_id: Optional album ID
+        width: Optional image/video width
+        height: Optional image/video height
+        s3_url: Optional public S3 URL
+        file_hash: Optional SHA256 hash
+        
+    Returns:
+        dict: Created file item
+        
+    Raises:
+        HTTPException: If database operation fails
+    """
     table = get_table()
     now = _now()
 
@@ -62,9 +103,9 @@ def create_file(
     file_name_enc = base64.urlsafe_b64encode(file_name.encode()).decode()
 
     item = {
-        "user_id": user_id,          # PK
-        "file_id": file_id,          # SK
-        "username": username,        # GSI key
+        "user_id": user_id,
+        "file_id": file_id,
+        "username": username,
         "file_name_enc": file_name_enc,
         "s3_key": s3_key,
         "file_type": file_type,
@@ -95,7 +136,17 @@ def create_file(
 
 
 # ── GET ALL FILES ──────────────────────────────────────────
-def get_user_files(user_id: str, include_deleted: bool = False) -> list:
+def get_user_files(user_id: str, include_deleted: bool = False) -> List[Dict[str, Any]]:
+    """
+    Get all files for a user.
+    
+    Args:
+        user_id: User's Cognito sub
+        include_deleted: Whether to include soft-deleted files
+        
+    Returns:
+        list: User's files sorted by upload date (newest first)
+    """
     table = get_table()
 
     kwargs = {
@@ -111,7 +162,20 @@ def get_user_files(user_id: str, include_deleted: bool = False) -> list:
 
 
 # ── GET SINGLE FILE ────────────────────────────────────────
-def get_file(user_id: str, file_id: str) -> dict:
+def get_file(user_id: str, file_id: str) -> Dict[str, Any]:
+    """
+    Get a single file by ID.
+    
+    Args:
+        user_id: User's Cognito sub
+        file_id: File's unique identifier
+        
+    Returns:
+        dict: File item
+        
+    Raises:
+        HTTPException: If file not found or database error
+    """
     table = get_table()
 
     try:
@@ -129,7 +193,17 @@ def get_file(user_id: str, file_id: str) -> dict:
 
 
 # ── GET FILES BY TYPE ──────────────────────────────────────
-def get_files_by_type(user_id: str, file_type: str) -> list:
+def get_files_by_type(user_id: str, file_type: str) -> List[Dict[str, Any]]:
+    """
+    Get all files of a specific type for a user.
+    
+    Args:
+        user_id: User's Cognito sub
+        file_type: File type (image/video/document)
+        
+    Returns:
+        list: Files of specified type
+    """
     table = get_table()
 
     return _paginated_query(
@@ -143,7 +217,16 @@ def get_files_by_type(user_id: str, file_type: str) -> list:
 
 
 # ── RECYCLE BIN ────────────────────────────────────────────
-def get_deleted_files(user_id: str) -> list:
+def get_deleted_files(user_id: str) -> List[Dict[str, Any]]:
+    """
+    Get all soft-deleted files for a user.
+    
+    Args:
+        user_id: User's Cognito sub
+        
+    Returns:
+        list: Soft-deleted files
+    """
     table = get_table()
 
     return _paginated_query(
@@ -154,7 +237,20 @@ def get_deleted_files(user_id: str) -> list:
 
 
 # ── SOFT DELETE ────────────────────────────────────────────
-def soft_delete_file(user_id: str, file_id: str) -> dict:
+def soft_delete_file(user_id: str, file_id: str) -> Dict[str, str]:
+    """
+    Soft delete a file (mark as deleted without removing from storage).
+    
+    Args:
+        user_id: User's Cognito sub
+        file_id: File's unique identifier
+        
+    Returns:
+        dict: Success message
+        
+    Raises:
+        HTTPException: If file not found or database error
+    """
     table = get_table()
 
     try:
@@ -176,7 +272,20 @@ def soft_delete_file(user_id: str, file_id: str) -> dict:
 
 
 # ── RESTORE ────────────────────────────────────────────────
-def restore_file(user_id: str, file_id: str) -> dict:
+def restore_file(user_id: str, file_id: str) -> Dict[str, str]:
+    """
+    Restore a soft-deleted file.
+    
+    Args:
+        user_id: User's Cognito sub
+        file_id: File's unique identifier
+        
+    Returns:
+        dict: Success message
+        
+    Raises:
+        HTTPException: If file not found or database error
+    """
     table = get_table()
 
     try:
@@ -198,7 +307,20 @@ def restore_file(user_id: str, file_id: str) -> dict:
 
 
 # ── PERMANENT DELETE ───────────────────────────────────────
-def delete_file(user_id: str, file_id: str) -> dict:
+def delete_file(user_id: str, file_id: str) -> Dict[str, str]:
+    """
+    Permanently delete a file record from DynamoDB.
+    
+    Args:
+        user_id: User's Cognito sub
+        file_id: File's unique identifier
+        
+    Returns:
+        dict: Success message
+        
+    Raises:
+        HTTPException: If file not found or database error
+    """
     table = get_table()
 
     try:
@@ -215,7 +337,21 @@ def delete_file(user_id: str, file_id: str) -> dict:
 
 
 # ── RENAME FILE ────────────────────────────────────────────
-def update_file_name(user_id: str, file_id: str, new_name: str) -> dict:
+def update_file_name(user_id: str, file_id: str, new_name: str) -> Dict[str, str]:
+    """
+    Update a file's name.
+    
+    Args:
+        user_id: User's Cognito sub
+        file_id: File's unique identifier
+        new_name: New filename
+        
+    Returns:
+        dict: Success message
+        
+    Raises:
+        HTTPException: If file not found, already deleted, or database error
+    """
     table = get_table()
 
     try:
@@ -241,7 +377,16 @@ def update_file_name(user_id: str, file_id: str, new_name: str) -> dict:
 
 
 # ── STORAGE STATS ──────────────────────────────────────────
-def get_storage_stats(user_id: str) -> dict:
+def get_storage_stats(user_id: str) -> Dict[str, Any]:
+    """
+    Calculate storage statistics for a user.
+    
+    Args:
+        user_id: User's Cognito sub
+        
+    Returns:
+        dict: Storage statistics including total bytes, file counts by type
+    """
     files = get_user_files(user_id)
 
     total = sum(f.get("file_size", 0) for f in files)
