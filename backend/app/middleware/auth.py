@@ -52,8 +52,16 @@ async def get_current_user(
         if username:
             try:
                 decrypted_username = decrypt_value(username)
-            except Exception:
+                # Debug logging - remove after fixing
+                print(f"[AUTH DEBUG] User ID: {user_id}")
+                print(f"[AUTH DEBUG] Username cookie exists: True")
+                print(f"[AUTH DEBUG] Decrypted username: {decrypted_username}")
+            except Exception as e:
+                print(f"[AUTH DEBUG] Failed to decrypt username: {str(e)}")
                 raise HTTPException(status_code=401, detail="Invalid username session")
+        else:
+            print(f"[AUTH DEBUG] User ID: {user_id}")
+            print(f"[AUTH DEBUG] Username cookie exists: False")
 
         return {
             "sub": user_id,

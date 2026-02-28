@@ -170,6 +170,7 @@ def login(payload: TokenPayload):
 
     # ── Resolve username (ONE TRUE SOURCE) ──
     if payload.username:
+        # First-time login with username provided
         username = normalize_username(payload.username)
         validate_username(username)
 
@@ -183,11 +184,24 @@ def login(payload: TokenPayload):
             name=name,
         )
     else:
+        # Returning user - fetch username from database
         db_user = user_service.get_user_by_id(user_id)
-        if not db_user or not db_user.get("username"):
+        
+        # Debug logging - remove after fixing
+        print(f"[LOGIN DEBUG] User ID: {user_id}")
+        print(f"[LOGIN DEBUG] DB User found: {db_user is not None}")
+        if db_user:
+            print(f"[LOGIN DEBUG] Username in DB: {db_user.get('username')}")
+        
+        if not db_user:
+            raise HTTPException(
+                status_code=404,
+                detail="User profile not found in database. Please contact support."
+            )
+        if not db_user.get("username"):
             raise HTTPException(
                 status_code=400,
-                detail="Username not found. Please complete signup."
+                detail="Username not set for this account. Please complete signup with username."
             )
         username = db_user["username"]
 

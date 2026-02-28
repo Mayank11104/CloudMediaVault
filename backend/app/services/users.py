@@ -109,6 +109,9 @@ def get_user_by_username(username: str) -> Optional[Dict[str, Any]]:
         
     Returns:
         dict or None: User profile if found, None otherwise
+        
+    Raises:
+        HTTPException: If GSI doesn't exist or database error occurs
     """
     table = get_table()
     
@@ -121,9 +124,16 @@ def get_user_by_username(username: str) -> Optional[Dict[str, Any]]:
         items = response.get('Items', [])
         return _deserialize(items[0]) if items else None
     except ClientError as e:
-        # If GSI doesn't exist yet, return None
-        print(f"Error querying username: {e}")
-        return None
+        error_code = e.response['Error']['Code']
+        if error_code == 'ResourceNotFoundException':
+            raise HTTPException(
+                status_code=500,
+                detail="Database configuration error: username-index GSI not found. Please contact administrator."
+            )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Database error while querying username: {str(e)}"
+        )
 
 # ── Check Username Availability ────────────────────────────
 def is_username_available(username: str) -> bool:
