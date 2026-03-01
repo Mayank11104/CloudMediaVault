@@ -11,61 +11,26 @@ jobs:
       contents: read
 
     steps:
-      # ─────────────────────────────────────────────
-      # 1️⃣ Checkout repository
-      # ─────────────────────────────────────────────
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # ─────────────────────────────────────────────
-      # 2️⃣ Configure AWS OIDC (no keys!)
-      # ─────────────────────────────────────────────
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::139228973770:role/GitHubActions-SSM-Role
           aws-region: eu-west-1
 
-      # ─────────────────────────────────────────────
-      # 3️⃣ Deploy via SSM (no SSH!)
-      # ─────────────────────────────────────────────
       - name: Deploy Backend via SSM
         run: |
           echo "🚀 Starting SSM deployment..."
           
-          COMMAND_ID=$(aws ssm send-command \
+          aws ssm send-command \
             --instance-ids i-07c0cb7897a9427f4 \
             --document-name AWS-RunShellScript \
-            --parameters commands='
-              cd /home/ubuntu/CloudMediaVault/backend || { echo "❌ Backend dir not found"; exit 1; }
-              echo "📥 Pulling latest code..."
-              git pull origin main
-              echo "🛑 Stopping containers..."
-              docker compose down || true
-              echo "🔨 Building images..."
-              docker compose build --no-cache
-              echo "▶️ Starting containers..."
-              docker compose up -d
-              echo "✅ Containers status:"
-              docker ps
-            ' \
+            --parameters commands='cd /home/ubuntu/CloudMediaVault/backend; git pull origin main; docker compose down || true; docker compose build --no-cache; docker compose up -d; docker ps' \
             --comment "GitHub Actions deploy #${{ github.run_number }}" \
             --region eu-west-1 \
             --query 'Command.CommandId' \
-            --output text)
+            --output text
 
-          echo "✅ Command ID: $COMMAND_ID"
-          echo "📊 Check progress: AWS Console → Systems Manager → Run Command → $COMMAND_ID"
-
-      # ─────────────────────────────────────────────
-      # 4️⃣ Wait for completion + show status
-      # ─────────────────────────────────────────────
-      - name: Wait for SSM completion
-        run: |
-          COMMAND_ID=${{ steps.deploy.outputs.command-id || env.COMMAND_ID }}
-          echo "⏳ Waiting for command $COMMAND_ID to complete..."
-          sleep 30
-          aws ssm get-command-invocation \
-            --command-id $COMMAND_ID \
-            --instance-id i-07c0cb7897a9427f4 \
-            --region eu-west-1
+          echo "✅ Deployment triggered! Check AWS Console → Systems Manager → Run Command"
