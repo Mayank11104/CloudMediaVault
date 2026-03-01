@@ -1,55 +1,43 @@
 name: Deploy Backend to EC2
-
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
 
 jobs:
   deploy:
-    name: Deploy Backend
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
-      # ─────────────────────────────────────────────
-      # 1️⃣ Checkout repository
-      # ─────────────────────────────────────────────
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # ─────────────────────────────────────────────
-      # 2️⃣ Setup SSH key
-      # ─────────────────────────────────────────────
-      - name: Setup SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::139228973770:role/GitHubActions-SSM-Role
+          aws-region: eu-west-1
 
-      # ─────────────────────────────────────────────
-      # 3️⃣ Deploy on EC2
-      # ─────────────────────────────────────────────
-      - name: Deploy Backend on EC2
-        run: |
-          ssh ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
-            set -e
-
-            echo "🚀 Deploying backend..."
-
-            cd ~/CloudMediaVault/backend
-
-            echo "📥 Pulling latest code"
+      - name: Deploy Backend via SSM
+        id: ssm
+        uses: peterkimzz/aws-ssm-send-command@master
+        with:
+          aws-region: eu-west-1
+          instance-ids: i-07c0cb7897a9427f4
+          working-directory: /home/ubuntu/CloudMediaVault/backend
+          comment: GitHub deployment
+          timeout-seconds: 600
+          command: |
+            cd ~/CloudMediaVault/backend || echo "Directory not found"
             git pull origin main
-
-            echo "🛑 Stopping containers"
-            docker compose down
-
-            echo "🔨 Building images"
-            docker compose build
-
-            echo "▶️ Starting containers"
+            docker compose down || true
+            docker compose build --no-cache
             docker compose up -d
+            docker ps
 
-            echo "✅ Backend deployed successfully"
-          EOF
+      - name: Show SSM results
+        run: |
+          echo "Command ID: ${{ steps.ssm.outputs.command-id }}"
+          echo "✅ Backend deployed via SSM!"
